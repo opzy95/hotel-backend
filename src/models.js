@@ -45,7 +45,7 @@ const hotelSchema = new Schema({
   slug: { type: String, required: true, unique: true },
   status: {
     type: String,
-    enum: ["pending_approval", "approved", "active", "suspended"],
+    enum: ["pending_approval", "active", "suspended"],
     default: "pending_approval",
     required: true,
   },

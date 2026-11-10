@@ -80,12 +80,6 @@ router.get(
   requirePlatformOperator,
   platformController.listPendingApprovalHotels,
 );
-router.post(
-  "/api/platform/hotels/:hotelId/approve",
-  authenticate,
-  requirePlatformOperator,
-  platformController.approveHotel,
-);
 router.patch(
   "/api/platform/hotels/:hotelId/status",
   authenticate,

@@ -1,4 +1,3 @@
-const mongoose = require("mongoose");
 const platformService = require("../services/platform-service");
 const { paginationSchema, planSchema, hotelStatusSchema } = require("../schemas");
 
@@ -33,17 +32,6 @@ async function listPendingApprovalHotels(req, res) {
   ));
 }
 
-async function approveHotel(req, res) {
-  if (!mongoose.isValidObjectId(req.params.hotelId)) {
-    return res.status(404).json({ error: "hotel_not_found" });
-  }
-  const result = await platformService.approveHotel(req.params.hotelId, req.user._id);
-  if (result.error) {
-    return res.status(result.status).json({ error: result.error });
-  }
-  return res.json({ hotel: result });
-}
-
 async function updateHotelStatus(req, res) {
   const parsed = hotelStatusSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -73,7 +61,6 @@ async function createPlan(req, res) {
 }
 
 module.exports = {
-  approveHotel,
   createPlan,
   listHotels,
   listPendingApprovalHotels,

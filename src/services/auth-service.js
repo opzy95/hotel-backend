@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const { timingSafeEqual } = require("node:crypto");
 const {
   AuthActionToken,
+  Hotel,
   HotelMembership,
   PlatformOperator,
   User,
@@ -140,7 +141,19 @@ async function verifyEmailCode(email, code) {
             },
             { session },
           );
-          verified = update.matchedCount === 1;
+          if (update.matchedCount === 1) {
+            const managedHotels = await HotelMembership.find({
+              userId: user._id,
+              role: "manager",
+              status: "active",
+            }).distinct("hotelId").session(session);
+            await Hotel.updateMany(
+              { _id: { $in: managedHotels }, status: "pending_approval" },
+              { $set: { status: "active" } },
+              { session },
+            );
+            verified = true;
+          }
         });
       } finally {
         await session.endSession();

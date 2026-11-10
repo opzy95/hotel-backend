@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const mongoose = require("mongoose");
+const { Hotel } = require("./src/models");
 const { assertJwtConfig } = require("./src/utils/jwt");
 const {
   sendPasswordResetEmail,
@@ -52,6 +53,10 @@ if (require.main === module) {
 
   mongoose.connect(process.env.MONGO_URI)
     .then(async () => {
+      await Hotel.updateMany(
+        { status: "approved" },
+        { $set: { status: "active" } },
+      );
       await ensurePublicPlans();
       app.listen(port, () => {
         console.log(`Hotel backend listening on port ${port}`);

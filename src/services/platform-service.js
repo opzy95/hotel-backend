@@ -1,5 +1,14 @@
 const mongoose = require("mongoose");
-const { AuditLog, Hotel, HotelMembership, Plan, PlanPrice, Subscription, User } = require("../models");
+const {
+  AuditLog,
+  Hotel,
+  HotelMembership,
+  Plan,
+  PlanPrice,
+  Subscription,
+  SubscriptionPayment,
+  User,
+} = require("../models");
 const { normalizePlanPayload } = require("./plan-seed");
 const { expireSubscriptions } = require("./subscription-lifecycle");
 const { publicHotel } = require("../utils/public-resources");
@@ -10,16 +19,107 @@ async function listHotels(page, limit, userId) {
     action: "platform.hotels.list",
     metadata: { page, limit },
   });
+  await expireSubscriptions();
   const [hotels, total] = await Promise.all([
     Hotel.find()
-      .select("name email phone address.country status slug createdAt")
       .sort({ createdAt: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
     Hotel.countDocuments(),
   ]);
-  return { data: hotels, pagination: { page, limit, total } };
+  const hotelIds = hotels.map((hotel) => hotel._id);
+  const [memberships, subscriptions, payments] = await Promise.all([
+    HotelMembership.find({
+      hotelId: { $in: hotelIds },
+      role: "manager",
+      status: "active",
+    }).select("hotelId userId").lean(),
+    Subscription.find({ hotelId: { $in: hotelIds } })
+      .populate("planId", "code name description planType trialDays features limits")
+      .populate("planPriceId", "billingInterval amountMinor currency")
+      .lean(),
+    SubscriptionPayment.find({ hotelId: { $in: hotelIds } })
+      .select("hotelId subscriptionId provider providerReference amountMinor currency status verifiedAt createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .lean(),
+  ]);
+  const managers = await User.find({
+    _id: { $in: memberships.map((membership) => membership.userId) },
+  }).select("name email emailVerifiedAt createdAt").lean();
+
+  const managerById = new Map(
+    managers.map((manager) => [manager._id.toString(), manager]),
+  );
+  const managerByHotelId = new Map(
+    memberships.map((membership) => [
+      membership.hotelId.toString(),
+      managerById.get(membership.userId.toString()) || null,
+    ]),
+  );
+  const subscriptionByHotelId = new Map(
+    subscriptions.map((subscription) => [subscription.hotelId.toString(), subscription]),
+  );
+  const paymentsByHotelId = new Map();
+  for (const payment of payments) {
+    const key = payment.hotelId.toString();
+    const hotelPayments = paymentsByHotelId.get(key) || [];
+    hotelPayments.push(payment);
+    paymentsByHotelId.set(key, hotelPayments);
+  }
+
+  return {
+    data: hotels.map((hotel) => {
+      const subscription = subscriptionByHotelId.get(hotel._id.toString());
+      const plan = subscription?.planId;
+      const planPrice = subscription?.planPriceId;
+      return {
+        ...hotel,
+        manager: managerByHotelId.get(hotel._id.toString()) || null,
+        subscription: subscription ? {
+          id: subscription._id,
+          status: subscription.status,
+          plan: plan ? {
+            id: plan._id,
+            code: plan.code,
+            name: plan.name,
+            description: plan.description,
+            plan_type: plan.planType,
+            trial_days: plan.trialDays,
+            features: plan.features,
+            limits: plan.limits,
+          } : null,
+          plan_snapshot: subscription.planSnapshot || null,
+          plan_price: planPrice ? {
+            id: planPrice._id,
+            billing_interval: planPrice.billingInterval,
+            amount: planPrice.amountMinor,
+            currency: planPrice.currency,
+          } : null,
+          billing_interval: subscription.billing_interval,
+          selected_at: subscription.selected_at,
+          trial_start_date: subscription.trial_start_date,
+          trial_end_date: subscription.trial_end_date,
+          trial_used_at: subscription.trial_used_at,
+          activated_at: subscription.activated_at,
+          expires_at: subscription.expires_at,
+          payments: (paymentsByHotelId.get(hotel._id.toString()) || []).map((payment) => ({
+            id: payment._id,
+            subscription_id: payment.subscriptionId,
+            provider: payment.provider,
+            provider_reference: payment.providerReference,
+            amount: payment.amountMinor,
+            currency: payment.currency,
+            status: payment.status,
+            verified_at: payment.verifiedAt,
+            created_at: payment.createdAt,
+            updated_at: payment.updatedAt,
+          })),
+        } : null,
+      };
+    }),
+    pagination: { page, limit, total },
+  };
 }
 
 async function listPendingApprovalHotels(page, limit, userId) {
@@ -63,38 +163,6 @@ async function listPendingApprovalHotels(page, limit, userId) {
   };
 }
 
-async function approveHotel(hotelId, userId) {
-  const session = await mongoose.startSession();
-  let hotel;
-  try {
-    await session.withTransaction(async () => {
-      hotel = await Hotel.findOneAndUpdate(
-        { _id: hotelId, status: "pending_approval" },
-        { $set: { status: "approved" } },
-        { returnDocument: "after", runValidators: true, session },
-      );
-      if (hotel) {
-        await AuditLog.create(
-          [{
-            actorUserId: userId,
-            hotelId: hotel._id,
-            action: "hotel.approved",
-            targetId: hotel._id,
-          }],
-          { session },
-        );
-      }
-    });
-  } finally {
-    await session.endSession();
-  }
-  if (!hotel) {
-    const exists = await Hotel.exists({ _id: hotelId });
-    return { error: exists ? "hotel_not_pending_approval" : "hotel_not_found", status: exists ? 409 : 404 };
-  }
-  return publicHotel(hotel);
-}
-
 async function updateHotelStatus(hotelId, status, userId) {
   await expireSubscriptions(hotelId);
   const session = await mongoose.startSession();
@@ -102,20 +170,32 @@ async function updateHotelStatus(hotelId, status, userId) {
   let activationError;
   try {
     await session.withTransaction(async () => {
-      if (status === "active") {
-        const currentHotel = await Hotel.findById(hotelId)
-          .select("status")
-          .session(session);
-        if (!currentHotel) {
-          return;
-        }
-        if (!["approved", "active"].includes(currentHotel.status)) {
-          activationError = "hotel_not_approved";
-          return;
-        }
-        const subscription = await Subscription.findOne({ hotelId }).session(session);
-        if (!subscription || !["active", "trialing"].includes(subscription.status)) {
-          activationError = "subscription_not_active";
+      const currentHotel = await Hotel.findById(hotelId).select("status").session(session);
+      if (!currentHotel) {
+        return;
+      }
+      if (currentHotel.status === "pending_approval") {
+        activationError = "hotel_email_not_verified";
+        return;
+      }
+      if (!["active", "suspended"].includes(currentHotel.status)) {
+        activationError = "invalid_hotel_status";
+        return;
+      }
+      if (status === "active" && currentHotel.status === "suspended") {
+        const managerMembership = await HotelMembership.findOne({
+          hotelId,
+          role: "manager",
+          status: "active",
+        }).select("userId").session(session);
+        const verifiedManager = managerMembership
+          ? await User.exists({
+            _id: managerMembership.userId,
+            emailVerifiedAt: { $ne: null },
+          }).session(session)
+          : false;
+        if (!verifiedManager) {
+          activationError = "hotel_email_not_verified";
           return;
         }
       }
@@ -196,7 +276,6 @@ async function createPlan(data, userId) {
 }
 
 module.exports = {
-  approveHotel,
   createPlan,
   listHotels,
   listPendingApprovalHotels,

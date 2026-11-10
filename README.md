@@ -3,8 +3,8 @@
 This Express 5 API uses MongoDB through Mongoose. Hotel registration creates a
 tenant document, its first user, an active `manager` membership, and a
 `pending_selection` subscription in one MongoDB transaction. New hotels start
-as `pending_approval`; their manager can complete onboarding, but a platform
-operator must approve the hotel before it can be activated.
+as `pending_approval`; verifying the registering Manager's email activates the
+hotel. Platform operators can suspend and reactivate verified hotels.
 
 All hotel-scoped API routes resolve access from the authenticated user's
 membership for the `hotelId` in the route. A hotel ID supplied by a caller does
@@ -62,12 +62,11 @@ expiry, issuer, and audience checks.
 | `POST` | `/api/auth/reset-password` | Public | Set a new password with the one-time reset token |
 | `GET` | `/api/auth/me` | Authenticated | Return user, hotel memberships, and platform-operator status |
 | `POST` | `/api/hotels` | Authenticated | Create another hotel with the caller as its first Manager |
-| `GET` | `/api/hotels/{hotelId}/onboarding` | Hotel Manager | Read approval, plan, and setup progress |
+| `GET` | `/api/hotels/{hotelId}/onboarding` | Hotel Manager | Read hotel status, plan, and setup progress |
 | `PUT` | `/api/hotels/{hotelId}/subscription` | Hotel Manager | Select an active plan |
 | `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update initial hotel settings |
-| `GET` | `/api/platform/hotels` | Platform operator | List hotels for platform administration |
-| `GET` | `/api/platform/hotels/pending-approval` | Platform operator | List pending hotels with their registering Manager's name and email |
-| `POST` | `/api/platform/hotels/{hotelId}/approve` | Platform operator | Approve a pending hotel; does not activate it |
+| `GET` | `/api/platform/hotels` | Platform operator | List hotels with manager, subscription, plan, and subscription payment details |
+| `GET` | `/api/platform/hotels/pending-approval` | Platform operator | List hotels whose registering Manager has not verified email |
 | `PATCH` | `/api/platform/hotels/{hotelId}/status` | Platform operator | Activate or suspend a hotel |
 | `POST` | `/api/platform/plans` | Platform operator | Create a plan |
 
@@ -147,13 +146,14 @@ payment verification is implemented. The public catalog contains `STANDARD`
 separate paid plans. Plan entries include their database `id`, which is used
 when selecting a plan. `PUT /api/hotels/{hotelId}/subscription` accepts either
 `{ "planId": "<plan id>" }` or `{ "planCode": "STANDARD" }`; for compatibility,
-the plan code may also be sent as `planId`. The seed deactivates the previous six-month
-`PROFESSIONAL` price rather than deleting its record. A platform operator
-reviews pending hotels and the registering Manager through
-`GET /api/platform/hotels/pending-approval`, then approves one with
-`POST /api/platform/hotels/{hotelId}/approve`. Approval changes the hotel
-status to `approved`; activation is a separate action and requires an active or
-trialing subscription.
+the plan code may also be sent as `planId`. The seed deactivates the previous
+six-month `PROFESSIONAL` price rather than deleting its record. Hotels remain
+`pending_approval` until the manager verifies their email, at which point they
+become `active`. Platform operators can then switch hotels between `active`
+and `suspended` through `PATCH /api/platform/hotels/{hotelId}/status`.
+Suspended hotels are blocked from tenant-scoped operations until an operator
+reactivates them. Existing `approved` hotel statuses are migrated to `active`
+when the backend starts.
 
 ## Not included in this first slice
 

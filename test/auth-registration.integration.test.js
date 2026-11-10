@@ -22,6 +22,8 @@ test("hotel registration creates a Manager who can log in", {
     AuthActionToken,
     Hotel,
     HotelMembership,
+    Plan,
+    PlanPrice,
     PlatformOperator,
     Subscription,
     User,
@@ -38,6 +40,7 @@ test("hotel registration creates a Manager who can log in", {
   const hotelIds = [];
   let userId;
   let operatorUserId;
+  let planId;
   const sentEmails = [];
   const originalSendVerificationCodeEmail = app.locals.sendVerificationCodeEmail;
   const originalSendPasswordResetEmail = app.locals.sendPasswordResetEmail;
@@ -161,6 +164,7 @@ test("hotel registration creates a Manager who can log in", {
     });
     assert.equal(verificationResponse.status, 200);
     assert.ok((await User.findById(manager._id)).emailVerifiedAt);
+    assert.equal((await Hotel.findById(registration.hotel.id)).status, "active");
 
     const replayedVerificationResponse = await fetch(`${baseUrl}/api/auth/verify-code`, {
       method: "POST",
@@ -202,11 +206,18 @@ test("hotel registration creates a Manager who can log in", {
       { headers: { authorization: `Bearer ${login.token}` } },
     );
     assert.equal(managerPendingResponse.status, 403);
-    const managerApprovalResponse = await fetch(
-      `${baseUrl}/api/platform/hotels/${registration.hotel.id}/approve`,
-      { method: "POST", headers: { authorization: `Bearer ${login.token}` } },
+    const managerStatusResponse = await fetch(
+      `${baseUrl}/api/platform/hotels/${registration.hotel.id}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${login.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ status: "suspended" }),
+      },
     );
-    assert.equal(managerApprovalResponse.status, 403);
+    assert.equal(managerStatusResponse.status, 403);
 
     const operator = await User.create({
       name: "Test Platform Operator",
@@ -250,26 +261,73 @@ test("hotel registration creates a Manager who can log in", {
     const pendingHotel = pending.data.find(
       (hotel) => hotel._id.toString() === registration.hotel.id.toString(),
     );
-    assert.equal(pendingHotel?.manager.name, "Hotel Manager");
-    assert.equal(pendingHotel?.manager.email, managerEmail);
+    assert.equal(pendingHotel, undefined);
 
-    const earlyActivationResponse = await fetch(
+    const plan = await Plan.create({
+      name: "Test Trial Plan",
+      code: `TEST_${suffix.replace(/-/g, "").slice(0, 8)}`,
+      description: "Integration-test plan",
+      planType: "trial",
+      trialDays: 60,
+      features: { reservations: true },
+      limits: { rooms: null },
+    });
+    planId = plan._id;
+    const planPrice = await PlanPrice.create({
+      planId: plan._id,
+      billingInterval: "6_months",
+      amountMinor: 123456,
+      currency: "NGN",
+    });
+    await Subscription.updateOne(
+      { hotelId: registration.hotel.id },
+      {
+        $set: {
+          planId: plan._id,
+          planPriceId: planPrice._id,
+          planSnapshot: { code: plan.code, name: plan.name, planType: "trial" },
+          status: "trialing",
+          billing_interval: "6_months",
+          selected_at: new Date(),
+          trial_start_date: new Date(),
+          trial_end_date: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+        },
+      },
+    );
+    const allHotelsResponse = await fetch(
+      `${baseUrl}/api/platform/hotels?page=1&limit=100`,
+      { headers: operatorHeaders },
+    );
+    assert.equal(allHotelsResponse.status, 200);
+    const allHotels = await allHotelsResponse.json();
+    const listedHotel = allHotels.data.find(
+      (hotel) => hotel._id.toString() === registration.hotel.id.toString(),
+    );
+    assert.equal(listedHotel.address.line1, "1 Example Road");
+    assert.equal(listedHotel.manager.email, managerEmail);
+    assert.ok(listedHotel.manager.emailVerifiedAt);
+    assert.equal(listedHotel.subscription.status, "trialing");
+    assert.equal(listedHotel.subscription.plan.code, plan.code);
+    assert.equal(listedHotel.subscription.plan_price.amount, 123456);
+    assert.equal(listedHotel.subscription.trial_end_date != null, true);
+
+    const suspendResponse = await fetch(
       `${baseUrl}/api/platform/hotels/${registration.hotel.id}/status`,
       {
         method: "PATCH",
         headers: { ...operatorHeaders, "content-type": "application/json" },
-        body: JSON.stringify({ status: "active" }),
+        body: JSON.stringify({ status: "suspended" }),
       },
     );
-    assert.equal(earlyActivationResponse.status, 409);
-    assert.equal((await earlyActivationResponse.json()).error, "hotel_not_approved");
+    assert.equal(suspendResponse.status, 200);
+    assert.equal((await suspendResponse.json()).hotel.status, "suspended");
 
-    const approvalResponse = await fetch(
-      `${baseUrl}/api/platform/hotels/${registration.hotel.id}/approve`,
-      { method: "POST", headers: operatorHeaders },
+    const suspendedOperationResponse = await fetch(
+      `${baseUrl}/api/hotels/${registration.hotel.id}/onboarding`,
+      { headers: { authorization: `Bearer ${login.token}` } },
     );
-    assert.equal(approvalResponse.status, 200);
-    assert.equal((await approvalResponse.json()).hotel.status, "approved");
+    assert.equal(suspendedOperationResponse.status, 403);
+    assert.equal((await suspendedOperationResponse.json()).error, "hotel_suspended");
 
     const activationResponse = await fetch(
       `${baseUrl}/api/platform/hotels/${registration.hotel.id}/status`,
@@ -279,8 +337,8 @@ test("hotel registration creates a Manager who can log in", {
         body: JSON.stringify({ status: "active" }),
       },
     );
-    assert.equal(activationResponse.status, 409);
-    assert.equal((await activationResponse.json()).error, "subscription_not_active");
+    assert.equal(activationResponse.status, 200);
+    assert.equal((await activationResponse.json()).hotel.status, "active");
 
     const forgotPasswordResponse = await fetch(`${baseUrl}/api/auth/forgot-password`, {
       method: "POST",
@@ -340,6 +398,10 @@ test("hotel registration creates a Manager who can log in", {
     await AuthActionToken.deleteMany({ userId: { $in: [userId, operatorUserId].filter(Boolean) } });
     await PlatformOperator.deleteMany({ userId: operatorUserId });
     await Subscription.deleteMany({ hotelId: { $in: hotelIds } });
+    if (planId) {
+      await PlanPrice.deleteMany({ planId });
+      await Plan.deleteOne({ _id: planId });
+    }
     await HotelMembership.deleteMany({ hotelId: { $in: hotelIds } });
     await Hotel.deleteMany({ _id: { $in: hotelIds } });
     await User.deleteMany({
