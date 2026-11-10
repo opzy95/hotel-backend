@@ -32,9 +32,9 @@ const DEFAULT_PLANS = [
     },
   },
   {
-    code: "PROFESSIONAL",
-    name: "Professional",
-    description: "Complete hotel management solution for growing hotels.",
+    code: "STANDARD",
+    name: "Standard",
+    description: "Hotel management plan billed every six months.",
     planType: "paid",
     trialDays: 0,
     active: true,
@@ -61,11 +61,41 @@ const DEFAULT_PLANS = [
       reservations: null,
     },
   },
+  {
+    code: "PROFESSIONAL",
+    name: "Professional",
+    description: "Complete hotel management solution billed annually.",
+    planType: "paid",
+    trialDays: 0,
+    active: true,
+    isPublic: true,
+    sortOrder: 3,
+    features: {
+      dashboard: true,
+      reservations: true,
+      room_management: true,
+      room_categories: true,
+      guest_management: true,
+      check_in_check_out: true,
+      staff_management: true,
+      role_permissions: true,
+      housekeeping: true,
+      reports: true,
+      public_booking_website: true,
+      online_payments: true,
+      notifications: true,
+    },
+    limits: {
+      rooms: null,
+      staff_accounts: null,
+      reservations: null,
+    },
+  },
 ];
 
 const DEFAULT_PLAN_PRICES = [
   {
-    planCode: "PROFESSIONAL",
+    planCode: "STANDARD",
     billingInterval: "6_months",
     amountMinor: 150000,
     currency: "NGN",
@@ -110,7 +140,7 @@ async function ensurePublicPlans() {
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
         setDefaultsOnInsert: true,
       },
     );
@@ -138,7 +168,7 @@ async function ensurePublicPlans() {
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
       },
     );
     planPrices.push({
@@ -150,10 +180,22 @@ async function ensurePublicPlans() {
     });
   }
 
+  const professionalPlan = planByCode.get("PROFESSIONAL");
+  if (professionalPlan) {
+    await PlanPrice.updateMany(
+      {
+        planId: professionalPlan._id,
+        billingInterval: "6_months",
+      },
+      { $set: { active: false } },
+    );
+  }
+
   return {
     plans: plans
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
       .map((plan) => ({
+        id: plan._id,
         code: plan.code,
         name: plan.name,
         description: plan.description || "",

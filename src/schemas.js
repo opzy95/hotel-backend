@@ -97,9 +97,19 @@ const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
+const planIdentifierSchema = z.string()
+  .trim()
+  .min(2)
+  .max(40)
+  .regex(/^(?:[a-f\d]{24}|[A-Za-z0-9_-]+)$/i);
+
 const planSelectionSchema = z.object({
-  planId: z.string().regex(/^[a-f\d]{24}$/i),
-});
+  planId: planIdentifierSchema.optional(),
+  planCode: planIdentifierSchema.optional(),
+}).refine(
+  (selection) => Boolean(selection.planId) !== Boolean(selection.planCode),
+  { message: "Provide exactly one of planId or planCode" },
+);
 
 const hotelStatusSchema = z.object({
   status: z.enum(["active", "suspended"]),

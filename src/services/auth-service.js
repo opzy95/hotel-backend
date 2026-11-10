@@ -127,7 +127,7 @@ async function verifyEmailCode(email, code) {
               expiresAt: { $gt: new Date() },
             },
             { $set: { consumedAt: new Date() } },
-            { new: true, session },
+            { returnDocument: "after", session },
           );
           if (!consumed) {
             return;
@@ -192,7 +192,7 @@ async function resendVerification(email, sendEmail) {
     ],
   }, {
     $set: { verificationCodeSentAt: now },
-  }, { new: true });
+  }, { returnDocument: "after" });
   if (user) {
     try {
       await sendVerificationCode(user, sendEmail);
@@ -233,7 +233,7 @@ async function resetPassword(token, password) {
           expiresAt: { $gt: new Date() },
         },
         { $set: { consumedAt: new Date() } },
-        { new: true, session },
+        { returnDocument: "after", session },
       );
       if (!actionToken) {
         return;

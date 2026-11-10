@@ -7,6 +7,7 @@ const {
   authenticate,
   requireManager,
   requirePlatformOperator,
+  requireSubscriptionWriteAccess,
 } = require("./middleware/auth");
 
 const router = express.Router();
@@ -63,6 +64,7 @@ router.patch(
   "/api/hotels/:hotelId/settings",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   hotelController.updateSettings,
 );
 

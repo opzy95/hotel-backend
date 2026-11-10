@@ -1,6 +1,14 @@
 const { randomBytes } = require("node:crypto");
 const mongoose = require("mongoose");
-const { Hotel, HotelMembership, Plan, PlanPrice, Subscription } = require("../models");
+const {
+  Hotel,
+  HotelMembership,
+  Plan,
+  PlanPrice,
+  Subscription,
+  User,
+} = require("../models");
+const { expireSubscriptions } = require("./subscription-lifecycle");
 const { publicHotel } = require("../utils/public-resources");
 
 async function createHotelWorkspace(hotelDetails, manager, session) {
@@ -63,6 +71,7 @@ async function getPublicPlans() {
 
   return {
     plans: plans.map((plan) => ({
+      id: plan._id,
       code: plan.code,
       name: plan.name,
       description: plan.description || "",
@@ -85,6 +94,7 @@ async function getPublicPlans() {
 }
 
 async function getOnboarding(hotelId) {
+  await expireSubscriptions(hotelId);
   const [hotel, subscription] = await Promise.all([
     Hotel.findById(hotelId).select("status setupCompletedSteps"),
     Subscription.findOne({ hotelId }).populate("planId", "name code"),
@@ -105,50 +115,75 @@ async function getOnboarding(hotelId) {
     subscription: subscription ? {
       status: subscription.status,
       plan: subscription.planId,
-      trialEndsAt: subscription.trialEndsAt,
+      trial_start_date: subscription.trial_start_date,
+      trial_end_date: subscription.trial_end_date,
+      expires_at: subscription.expires_at,
     } : null,
   };
 }
 
-async function selectSubscriptionPlan(hotelId, planId) {
-  const plan = await Plan.findOne({ _id: planId, active: true });
+async function selectSubscriptionPlan(hotelId, planId, userId) {
+  await expireSubscriptions(hotelId);
+  const planFilter = mongoose.isValidObjectId(planId)
+    ? { _id: planId, active: true }
+    : { code: planId.toUpperCase(), active: true };
+  const [plan, user] = await Promise.all([
+    Plan.findOne(planFilter),
+    User.findById(userId).select("emailVerifiedAt"),
+  ]);
   if (!plan) {
     return { error: "plan_not_found" };
   }
 
-  const trialEndsAt = plan.trialDays
-    ? new Date(Date.now() + plan.trialDays * 24 * 60 * 60 * 1000)
-    : undefined;
-  const subscriptionUpdate = {
-    $set: {
-      planId: plan._id,
-      planSnapshot: {
-        name: plan.name,
-        amountMinor: plan.amountMinor,
-        currency: plan.currency,
-        interval: plan.interval,
-      },
-      status: trialEndsAt
-        ? "trialing"
-        : plan.amountMinor === 0
-          ? "active"
-          : "pending_payment",
-      ...(trialEndsAt ? { trialEndsAt } : {}),
-    },
-  };
-  if (!trialEndsAt) {
-    subscriptionUpdate.$unset = { trialEndsAt: 1 };
+  const isTrial = plan.planType === "trial" && plan.trialDays > 0;
+  if (isTrial && !user?.emailVerifiedAt) {
+    return { error: "email_not_verified" };
   }
 
-  const subscription = await Subscription.findOneAndUpdate(
-    {
-      hotelId,
-      status: { $in: ["pending_selection", "pending_payment"] },
+  const selectedAt = new Date();
+  const trialEndDate = isTrial
+    ? new Date(selectedAt.getTime() + plan.trialDays * 24 * 60 * 60 * 1000)
+    : undefined;
+  const setFields = {
+    planId: plan._id,
+    planSnapshot: {
+      code: plan.code,
+      name: plan.name,
+      description: plan.description,
+      planType: plan.planType,
+      amountMinor: plan.amountMinor,
+      currency: plan.currency,
     },
-    subscriptionUpdate,
-    { new: true, runValidators: true },
+    selected_at: selectedAt,
+    status: isTrial ? "trialing" : "pending",
+  };
+  if (isTrial) {
+    setFields.trial_start_date = selectedAt;
+    setFields.trial_end_date = trialEndDate;
+    setFields.trial_used_at = selectedAt;
+  }
+
+  const subscriptionFilter = {
+    hotelId,
+    status: isTrial
+      ? "pending_selection"
+      : { $in: ["pending_selection", "expired"] },
+  };
+  if (isTrial) {
+    subscriptionFilter.$or = [
+      { trial_used_at: { $exists: false } },
+      { trial_used_at: null },
+    ];
+  }
+  const subscription = await Subscription.findOneAndUpdate(
+    subscriptionFilter,
+    { $set: setFields },
+    { returnDocument: "after", runValidators: true },
   ).populate("planId", "name code amountMinor currency interval trialDays features");
   if (!subscription) {
+    if (isTrial && await Subscription.exists({ hotelId, trial_used_at: { $ne: null } })) {
+      return { error: "trial_already_used" };
+    }
     return { error: "subscription_selection_locked" };
   }
 
@@ -161,9 +196,10 @@ async function selectSubscriptionPlan(hotelId, planId) {
       status: subscription.status,
       plan: subscription.planId,
       planSnapshot: subscription.planSnapshot,
-      trialEndsAt: subscription.trialEndsAt,
+      trial_start_date: subscription.trial_start_date,
+      trial_end_date: subscription.trial_end_date,
     },
-    paymentRequired: subscription.status === "pending_payment",
+    paymentRequired: subscription.status === "pending",
   };
 }
 

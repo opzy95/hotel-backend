@@ -48,10 +48,17 @@ async function selectSubscriptionPlan(req, res) {
   }
   const result = await hotelService.selectSubscriptionPlan(
     req.params.hotelId,
-    parsed.data.planId,
+    parsed.data.planId || parsed.data.planCode,
+    req.user._id,
   );
   if (result.error === "plan_not_found") {
     return res.status(404).json({ error: result.error });
+  }
+  if (result.error === "email_not_verified") {
+    return res.status(403).json({ error: result.error });
+  }
+  if (result.error === "trial_already_used") {
+    return res.status(409).json({ error: result.error });
   }
   if (result.error === "subscription_selection_locked") {
     return res.status(409).json({ error: result.error });

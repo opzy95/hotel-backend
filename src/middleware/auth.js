@@ -3,8 +3,10 @@ const {
   Hotel,
   HotelMembership,
   PlatformOperator,
+  Subscription,
   User,
 } = require("../models");
+const { expireSubscriptions } = require("../services/subscription-lifecycle");
 const { isJwtVerificationError, verifyAccessToken } = require("../utils/jwt");
 
 async function authenticate(req, res, next) {
@@ -51,6 +53,20 @@ async function requireManager(req, res, next) {
   if (hotel.status === "suspended") {
     return res.status(403).json({ error: "hotel_suspended" });
   }
+  await expireSubscriptions(hotel._id);
+  return next();
+}
+
+async function requireSubscriptionWriteAccess(req, res, next) {
+  const subscription = await Subscription.findOne({
+    hotelId: req.params.hotelId,
+  }).select("status");
+  if (subscription?.status === "expired") {
+    return res.status(403).json({
+      error: "subscription_expired",
+      message: "This hotel is read-only until its subscription is renewed.",
+    });
+  }
   return next();
 }
 
@@ -65,4 +81,9 @@ async function requirePlatformOperator(req, res, next) {
   return next();
 }
 
-module.exports = { authenticate, requireManager, requirePlatformOperator };
+module.exports = {
+  authenticate,
+  requireManager,
+  requirePlatformOperator,
+  requireSubscriptionWriteAccess,
+};

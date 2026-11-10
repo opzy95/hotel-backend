@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const { AuditLog, Hotel, HotelMembership, Plan, PlanPrice, Subscription, User } = require("../models");
 const { normalizePlanPayload } = require("./plan-seed");
+const { expireSubscriptions } = require("./subscription-lifecycle");
 const { publicHotel } = require("../utils/public-resources");
 
 async function listHotels(page, limit, userId) {
@@ -70,7 +71,7 @@ async function approveHotel(hotelId, userId) {
       hotel = await Hotel.findOneAndUpdate(
         { _id: hotelId, status: "pending_approval" },
         { $set: { status: "approved" } },
-        { new: true, runValidators: true, session },
+        { returnDocument: "after", runValidators: true, session },
       );
       if (hotel) {
         await AuditLog.create(
@@ -95,6 +96,7 @@ async function approveHotel(hotelId, userId) {
 }
 
 async function updateHotelStatus(hotelId, status, userId) {
+  await expireSubscriptions(hotelId);
   const session = await mongoose.startSession();
   let hotel;
   let activationError;
@@ -120,7 +122,7 @@ async function updateHotelStatus(hotelId, status, userId) {
       hotel = await Hotel.findByIdAndUpdate(
         hotelId,
         { $set: { status } },
-        { new: true, runValidators: true, session },
+        { returnDocument: "after", runValidators: true, session },
       );
       if (hotel) {
         await AuditLog.create(

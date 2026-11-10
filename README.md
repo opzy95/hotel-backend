@@ -21,6 +21,7 @@ receive their privileges from hotel membership.
 
    ```sh
    npm run seed:platform-admin
+   npm run seed:plans
    npm start
    ```
 4. Configure Brevo transactional email with `BREVO_API_KEY`,
@@ -134,21 +135,32 @@ automatically. Brevo delivery failures are logged and surfaced as HTTP 503.
 
 Successful registration returns the new hotel with
 `status: "pending_approval"`, a `manager` membership, and onboarding step
-`choose_plan`. Selecting a plan stores a price snapshot. Paid plans are marked
-`pending_payment`; free plans or plans in a trial are marked `active` or
-`trialing` respectively. A platform operator reviews pending hotels and the
-registering Manager through `GET /api/platform/hotels/pending-approval`, then
-approves one with `POST /api/platform/hotels/{hotelId}/approve`. Approval
-changes the hotel status to `approved`; activation is a separate action and
-requires an active or trialing subscription. Plan selection locks once a free
-or trial plan is selected. Trial expiry is not automated in this first slice.
+`choose_plan`. A verified manager can select the 60-day `FREE_TRIAL` once per
+hotel. Its start and end are stored in `trial_start_date` and `trial_end_date`;
+the end date is 60 days after selection. When a manager accesses the hotel
+after the end date, the subscription is marked `expired`. Expired hotels can
+still access onboarding and subscription selection, but settings changes are
+blocked as read-only. Expiry is applied when a hotel-scoped request is made,
+not by a background scheduler. Paid plan selection remains `pending` until
+payment verification is implemented. The public catalog contains `STANDARD`
+(six months, NGN 150,000) and `PROFESSIONAL` (twelve months, NGN 270,000) as
+separate paid plans. Plan entries include their database `id`, which is used
+when selecting a plan. `PUT /api/hotels/{hotelId}/subscription` accepts either
+`{ "planId": "<plan id>" }` or `{ "planCode": "STANDARD" }`; for compatibility,
+the plan code may also be sent as `planId`. The seed deactivates the previous six-month
+`PROFESSIONAL` price rather than deleting its record. A platform operator
+reviews pending hotels and the registering Manager through
+`GET /api/platform/hotels/pending-approval`, then approves one with
+`POST /api/platform/hotels/{hotelId}/approve`. Approval changes the hotel
+status to `approved`; activation is a separate action and requires an active or
+trialing subscription.
 
 ## Not included in this first slice
 
 Payment-provider checkout/webhooks, staff invitations/email delivery, hotel
 domains, room inventory, bookings, guest records, and audit-log browsing are
 not implemented yet. Do not treat
-`pending_payment` as proof that a payment succeeded. Paid plans without a trial
+`pending` as proof that a payment succeeded. Paid plans without a trial
 cannot be activated until payment processing is integrated. The hotel
 registration address requires a two-letter country code; currency uses a
 three-letter ISO code and prices are integer minor units.
