@@ -35,8 +35,9 @@ function configureEmail() {
   process.env.FRONTEND_URL = "http://localhost:5173";
 }
 
-test("verification email uses Brevo and builds the configured frontend link", async () => {
+test("verification email sends the six-digit code without requiring a frontend URL", async () => {
   configureEmail();
+  delete process.env.FRONTEND_URL;
   let request;
   globalThis.fetch = async (url, options) => {
     request = { url, options };
@@ -45,7 +46,7 @@ test("verification email uses Brevo and builds the configured frontend link", as
 
   await sendVerificationEmail(
     { email: "manager@example.com", name: "<Manager & Co>" },
-    "verification-token",
+    "012345",
   );
 
   assert.equal(request.url, "https://api.brevo.com/v3/smtp/email");
@@ -53,10 +54,9 @@ test("verification email uses Brevo and builds the configured frontend link", as
   const body = JSON.parse(request.options.body);
   assert.equal(body.to[0].email, "manager@example.com");
   assert.match(body.htmlContent, /&lt;Manager &amp; Co&gt;/);
-  const link = new URL(body.textContent.match(/https?:\/\/\S+/)[0]);
-  assert.equal(link.origin, "http://localhost:5173");
-  assert.equal(link.pathname, "/verify-email");
-  assert.equal(link.searchParams.get("token"), "verification-token");
+  assert.match(body.textContent, /\b012345\b/);
+  assert.match(body.htmlContent, /<strong>012345<\/strong>/);
+  assert.doesNotMatch(body.textContent, /https?:\/\//);
 });
 
 test("password-reset email points to the frontend reset page", async () => {
@@ -92,17 +92,15 @@ test("Brevo API errors are surfaced to the caller", async () => {
   );
 });
 
-test("requires HTTPS for non-local frontend email links", async () => {
+test("requires HTTPS for non-local password-reset links", async () => {
   configureEmail();
   process.env.FRONTEND_URL = "http://frontend.example.com";
 
   await assert.rejects(
-    () => sendBrevoEmail({
-      to: { email: "manager@example.com", name: "Manager" },
-      subject: "Test",
-      text: "Test",
-      html: "<p>Test</p>",
-    }),
+    () => sendPasswordResetEmail(
+      { email: "manager@example.com", name: "Manager" },
+      "reset-token",
+    ),
     /HTTPS outside localhost/,
   );
 });

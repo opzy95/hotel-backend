@@ -28,8 +28,18 @@ receive their privileges from hotel membership.
    address must be verified in Brevo. Keep the API key only in the backend
    environment.
 
-The seed command creates or activates a separate platform-operator grant. It
-does not provide a public super-admin signup route.
+## Code structure
+
+Routes are declared in `src/routes.js`. Controllers in `src/controllers/`
+validate HTTP input, call the corresponding service, and format HTTP responses.
+Services in `src/services/` contain business logic and database operations.
+Authentication and access checks are in `src/middleware/auth.js`.
+
+The seed command creates or activates a separate platform-operator grant.
+The provisioned platform administrator is marked as verified, and active
+`super_admin` accounts can log in without email verification. Hotel accounts
+still need to verify their email. The seed command does not provide a public
+super-admin signup route.
 
 ## Current API
 
@@ -44,8 +54,9 @@ expiry, issuer, and audience checks.
 | `GET` | `/api/public/plans` | Public | List active plans |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant, Manager membership, and pending subscription |
 | `POST` | `/api/auth/login` | Public, rate-limited | Sign in with email/password |
-| `POST` | `/api/auth/verify-email` | Public | Verify email with the one-time token from the email link |
-| `POST` | `/api/auth/resend-verification` | Public, rate-limited | Send a new verification email |
+| `POST` | `/api/auth/send-verification-code` | Public, rate-limited | Send a six-digit verification code |
+| `POST` | `/api/auth/verify-code` | Public | Verify an email with its six-digit code |
+| `POST` | `/api/auth/resend-verification` | Public, rate-limited | Resend a verification code after the cooldown |
 | `POST` | `/api/auth/forgot-password` | Public, rate-limited | Request a password-reset email |
 | `POST` | `/api/auth/reset-password` | Public | Set a new password with the one-time reset token |
 | `GET` | `/api/auth/me` | Authenticated | Return user, hotel memberships, and platform-operator status |
@@ -93,15 +104,19 @@ platform super admins. After registration, the manager can sign in with:
 }
 ```
 
-Registration sends a verification email and does not issue an access token.
-The frontend should take the token from the `/verify-email?token=...` link and
-POST `{ "token": "..." }` to `/api/auth/verify-email`. Verification tokens
-expire after 24 hours and can be used once. Until verified, login returns
-`403 email_not_verified`; use `POST /api/auth/resend-verification` with
-`{ "email": "manager@example.com" }` to request another link.
+Registration sends a six-digit code and does not issue an access token. The
+response includes `message: "We sent a code to your email."`. Submit
+`{ "email": "manager@example.com", "code": "123456" }` to
+`POST /api/auth/verify-code`. Codes expire after 10 minutes and allow at most
+three incorrect attempts; after lockout, request a new code. Use
+`POST /api/auth/send-verification-code` or
+`POST /api/auth/resend-verification` with
+`{ "email": "manager@example.com" }` to request one. Resending is available
+once per 60 seconds. Until verified, hotel-account login returns
+`403 email_not_verified`.
 If Brevo delivery fails during registration, the API returns
 `503 verification_email_delivery_failed`; the account has already been
-created, so the user should request another verification email rather than
+created, so the user should request another verification code rather than
 registering again.
 
 Password recovery uses the same `POST /api/auth/forgot-password` endpoint for
@@ -111,11 +126,11 @@ hotel Managers and platform super admins, with
 `/reset-password?token=...`. Submit the token and a new password to
 `POST /api/auth/reset-password`. Reset tokens expire after one hour, are
 single-use, and resetting the password invalidates existing access tokens.
-Configure the frontend routes `/verify-email` and `/reset-password`, and set
-`FRONTEND_URL` to the frontend origin.
-Valid requests are rate limited. Email action tokens are stored as SHA-256
-hashes, are one-time use, and expire automatically in MongoDB after their
-validity period. Brevo delivery failures are logged and surfaced as HTTP 503.
+Configure the frontend route `/reset-password`, and set `FRONTEND_URL` to the
+frontend origin. Valid requests are rate limited. Verification codes are stored
+as keyed hashes, are single-use, and expire automatically in MongoDB. Password
+reset tokens are stored as SHA-256 hashes, are single-use, and also expire
+automatically. Brevo delivery failures are logged and surfaced as HTTP 503.
 
 Successful registration returns the new hotel with
 `status: "pending_approval"`, a `manager` membership, and onboarding step

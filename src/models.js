@@ -7,6 +7,7 @@ const userSchema = new Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
   emailVerifiedAt: { type: Date, default: null },
+  verificationCodeSentAt: { type: Date, default: null },
   authVersion: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 
@@ -18,8 +19,11 @@ const authActionTokenSchema = new Schema({
     enum: ["email_verification", "password_reset"],
     required: true,
   },
+  tokenSalt: { type: String },
   expiresAt: { type: Date, required: true },
   consumedAt: { type: Date, default: null },
+  attempts: { type: Number, min: 0, max: 3, default: 0 },
+  lockedAt: { type: Date, default: null },
 }, { timestamps: true });
 authActionTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 authActionTokenSchema.index({ userId: 1, purpose: 1, consumedAt: 1 });
@@ -72,30 +76,67 @@ const operatorSchema = new Schema({
 
 const planSchema = new Schema({
   name: { type: String, required: true, trim: true },
-  code: { type: String, required: true, unique: true, lowercase: true },
+  code: { type: String, required: true, unique: true, uppercase: true, trim: true },
+  description: { type: String, default: "" },
+  planType: { type: String, enum: ["trial", "paid"], default: "paid", required: true },
+  trialDays: { type: Number, min: 0, max: 365, default: 0 },
+  features: { type: Schema.Types.Mixed, default: {} },
+  limits: { type: Schema.Types.Mixed, default: {} },
+  active: { type: Boolean, default: true },
+  isPublic: { type: Boolean, default: true },
+  sortOrder: { type: Number, min: 0, default: 0 },
+  amountMinor: { type: Number, min: 0 },
+  currency: { type: String, uppercase: true },
+  interval: { type: String, enum: ["month", "year", "6_months", "12_months"] },
+}, { timestamps: true });
+
+const planPriceSchema = new Schema({
+  planId: { type: Schema.Types.ObjectId, ref: "Plan", required: true },
+  billingInterval: { type: String, enum: ["6_months", "12_months"], required: true },
   amountMinor: { type: Number, required: true, min: 0 },
   currency: { type: String, required: true, uppercase: true },
-  interval: { type: String, enum: ["month", "year"], required: true },
-  trialDays: { type: Number, min: 0, max: 365, default: 0 },
-  features: { type: [String], default: [] },
   active: { type: Boolean, default: true },
 }, { timestamps: true });
+planPriceSchema.index({ planId: 1, billingInterval: 1 }, { unique: true });
 
 const subscriptionSchema = new Schema({
   hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true, unique: true },
   planId: { type: Schema.Types.ObjectId, ref: "Plan", default: null },
+  planPriceId: { type: Schema.Types.ObjectId, ref: "PlanPrice", default: null },
   planSnapshot: {
+    code: String,
     name: String,
+    description: String,
+    planType: String,
     amountMinor: Number,
     currency: String,
-    interval: String,
+    billingInterval: String,
   },
   status: {
     type: String,
-    enum: ["pending_selection", "pending_payment", "trialing", "active", "cancelled"],
+    enum: ["pending_selection", "pending", "trialing", "active", "expired", "past_due", "cancelled"],
     default: "pending_selection",
   },
-  trialEndsAt: Date,
+  billing_interval: { type: String, enum: ["6_months", "12_months"] },
+  selected_at: Date,
+  trial_start_date: Date,
+  trial_end_date: Date,
+  trial_used_at: Date,
+  activated_at: Date,
+  expires_at: Date,
+}, { timestamps: true });
+
+const subscriptionPaymentSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true, index: true },
+  subscriptionId: { type: Schema.Types.ObjectId, ref: "Subscription", required: true, index: true },
+  planPriceId: { type: Schema.Types.ObjectId, ref: "PlanPrice", required: true },
+  provider: { type: String, enum: ["paystack"], default: "paystack", required: true },
+  providerReference: { type: String, required: true, unique: true },
+  amountMinor: { type: Number, required: true, min: 0 },
+  currency: { type: String, required: true, uppercase: true },
+  status: { type: String, enum: ["pending", "successful", "failed", "cancelled"], default: "pending", required: true },
+  verifiedAt: Date,
+  metadata: { type: Schema.Types.Mixed, default: {} },
 }, { timestamps: true });
 
 const auditLogSchema = new Schema({
@@ -114,6 +155,8 @@ module.exports = {
   HotelMembership: mongoose.models.HotelMembership || mongoose.model("HotelMembership", membershipSchema),
   PlatformOperator: mongoose.models.PlatformOperator || mongoose.model("PlatformOperator", operatorSchema),
   Plan: mongoose.models.Plan || mongoose.model("Plan", planSchema),
+  PlanPrice: mongoose.models.PlanPrice || mongoose.model("PlanPrice", planPriceSchema),
   Subscription: mongoose.models.Subscription || mongoose.model("Subscription", subscriptionSchema),
+  SubscriptionPayment: mongoose.models.SubscriptionPayment || mongoose.model("SubscriptionPayment", subscriptionPaymentSchema),
   User: mongoose.models.User || mongoose.model("User", userSchema),
 };

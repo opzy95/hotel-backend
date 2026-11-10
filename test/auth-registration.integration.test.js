@@ -3,6 +3,7 @@ require("dotenv").config();
 const { randomUUID } = require("node:crypto");
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const bcrypt = require("bcryptjs");
 
 const testMongoUri = process.env.TEST_MONGO_URI;
 
@@ -32,15 +33,16 @@ test("hotel registration creates a Manager who can log in", {
   const operatorEmail = `operator-${suffix}@example.test`;
   const hotelEmail = `hotel-${suffix}@example.test`;
   const password = "unique-test-password-2026";
+  const operatorPassword = "unique-operator-password-2026";
   const resetPassword = "another-unique-password-2026";
   const hotelIds = [];
   let userId;
   let operatorUserId;
   const sentEmails = [];
-  const originalSendVerificationEmail = app.locals.sendVerificationEmail;
+  const originalSendVerificationCodeEmail = app.locals.sendVerificationCodeEmail;
   const originalSendPasswordResetEmail = app.locals.sendPasswordResetEmail;
-  app.locals.sendVerificationEmail = async (user, token) => {
-    sentEmails.push({ type: "verification", user, token });
+  app.locals.sendVerificationCodeEmail = async (user, code) => {
+    sentEmails.push({ type: "verification", user, code });
   };
   app.locals.sendPasswordResetEmail = async (user, token) => {
     sentEmails.push({ type: "password_reset", user, token });
@@ -81,6 +83,8 @@ test("hotel registration creates a Manager who can log in", {
     const registration = await registrationResponse.json();
     assert.equal(registration.token, undefined);
     assert.equal(registration.emailVerificationRequired, true);
+    assert.equal(registration.message, "We sent a code to your email.");
+    assert.equal(registration.verificationCodeResendAvailableInSeconds, 60);
     assert.equal(registration.user.email, managerEmail);
     assert.equal(registration.membership.role, "manager");
     assert.equal(registration.membership.status, "active");
@@ -93,13 +97,14 @@ test("hotel registration creates a Manager who can log in", {
     userId = manager._id;
     assert.notEqual(manager.passwordHash, password);
     assert.equal(manager.emailVerifiedAt, null);
-    assert.ok(registrationMail?.token);
+    assert.match(registrationMail?.code, /^\d{6}$/);
     const storedVerificationToken = await AuthActionToken.findOne({
       userId: manager._id,
       purpose: "email_verification",
     });
     assert.ok(storedVerificationToken);
-    assert.notEqual(storedVerificationToken.tokenHash, registrationMail.token);
+    assert.notEqual(storedVerificationToken.tokenHash, registrationMail.code);
+    assert.equal(storedVerificationToken.attempts, 0);
 
     const unverifiedLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
@@ -109,18 +114,58 @@ test("hotel registration creates a Manager who can log in", {
     assert.equal(unverifiedLoginResponse.status, 403);
     assert.equal((await unverifiedLoginResponse.json()).error, "email_not_verified");
 
-    const verificationResponse = await fetch(`${baseUrl}/api/auth/verify-email`, {
+    const incorrectCode = registrationMail.code === "000000" ? "111111" : "000000";
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const incorrectResponse = await fetch(`${baseUrl}/api/auth/verify-code`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: managerEmail, code: incorrectCode }),
+      });
+      assert.equal(incorrectResponse.status, 400);
+      assert.equal((await incorrectResponse.json()).attemptsRemaining, 2 - attempt);
+    }
+    const lockedCodeResponse = await fetch(`${baseUrl}/api/auth/verify-code`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: registrationMail.token }),
+      body: JSON.stringify({ email: managerEmail, code: incorrectCode }),
+    });
+    assert.equal(lockedCodeResponse.status, 429);
+    assert.equal((await lockedCodeResponse.json()).error, "verification_code_locked");
+
+    const verificationEmailCount = sentEmails.filter((email) => email.type === "verification").length;
+    const cooldownResponse = await fetch(`${baseUrl}/api/auth/resend-verification`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: managerEmail }),
+    });
+    assert.equal(cooldownResponse.status, 202);
+    assert.equal(sentEmails.filter((email) => email.type === "verification").length, verificationEmailCount);
+
+    await User.updateOne(
+      { _id: manager._id },
+      { $set: { verificationCodeSentAt: new Date(Date.now() - 61_000) } },
+    );
+    const resendResponse = await fetch(`${baseUrl}/api/auth/resend-verification`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: managerEmail }),
+    });
+    assert.equal(resendResponse.status, 202);
+    const latestVerificationMail = sentEmails.findLast((email) => email.type === "verification");
+    assert.match(latestVerificationMail.code, /^\d{6}$/);
+
+    const verificationResponse = await fetch(`${baseUrl}/api/auth/verify-code`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: managerEmail, code: latestVerificationMail.code }),
     });
     assert.equal(verificationResponse.status, 200);
     assert.ok((await User.findById(manager._id)).emailVerifiedAt);
 
-    const replayedVerificationResponse = await fetch(`${baseUrl}/api/auth/verify-email`, {
+    const replayedVerificationResponse = await fetch(`${baseUrl}/api/auth/verify-code`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: registrationMail.token }),
+      body: JSON.stringify({ email: managerEmail, code: latestVerificationMail.code }),
     });
     assert.equal(replayedVerificationResponse.status, 400);
 
@@ -166,10 +211,22 @@ test("hotel registration creates a Manager who can log in", {
     const operator = await User.create({
       name: "Test Platform Operator",
       email: operatorEmail,
-      passwordHash: "test-only-hash",
+      passwordHash: await bcrypt.hash(operatorPassword, 12),
     });
     operatorUserId = operator._id;
-    await PlatformOperator.create({ userId: operator._id, active: true });
+    await PlatformOperator.create({
+      userId: operator._id,
+      role: "super_admin",
+      active: true,
+    });
+    assert.equal(operator.emailVerifiedAt, null);
+    const operatorLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: operatorEmail, password: operatorPassword }),
+    });
+    assert.equal(operatorLoginResponse.status, 200);
+    assert.ok((await operatorLoginResponse.json()).token);
     const operatorToken = signAccessToken(operator._id);
     const operatorHeaders = { authorization: `Bearer ${operatorToken}` };
 
@@ -296,7 +353,7 @@ test("hotel registration creates a Manager who can log in", {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     await mongoose.disconnect();
-    app.locals.sendVerificationEmail = originalSendVerificationEmail;
+    app.locals.sendVerificationCodeEmail = originalSendVerificationCodeEmail;
     app.locals.sendPasswordResetEmail = originalSendPasswordResetEmail;
   }
 });

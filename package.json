@@ -8,6 +8,7 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "seed:platform-admin": "node scripts/create-platform-admin.js",
+    "seed:plans": "node scripts/seed-public-plans.js",
     "test": "node --test"
   },
   "dependencies": {

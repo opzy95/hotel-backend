@@ -60,14 +60,24 @@ test("login rejects malformed credentials without querying the database", async 
   assert.equal((await response.json()).error, "invalid_credentials");
 });
 
-test("email verification rejects malformed action tokens", async () => {
-  const response = await fetch(`${baseUrl}/api/auth/verify-email`, {
+test("email verification rejects codes that are not six digits", async () => {
+  const response = await fetch(`${baseUrl}/api/auth/verify-code`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: "not-a-token" }),
+    body: JSON.stringify({ email: "manager@example.com", code: "123" }),
   });
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "invalid_or_expired_token");
+  assert.equal((await response.json()).error, "invalid_verification_code");
+});
+
+test("send-verification-code endpoint is registered and validates the email", async () => {
+  const response = await fetch(`${baseUrl}/api/auth/send-verification-code`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "not-an-email" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "invalid_email");
 });
 
 test("password reset validates tokens and password policy before database access", async () => {
