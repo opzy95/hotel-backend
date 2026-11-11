@@ -115,8 +115,48 @@ const hotelStatusSchema = z.object({
   status: z.enum(["active", "suspended"]),
 });
 
+const bedSetupItemSchema = z.object({
+  type: z.string().trim().min(1).max(40),
+  count: z.number().int().min(1).max(20),
+});
+
+const roomTypeSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).optional().default(""),
+  sizeSqm: z.number().positive().max(10000),
+  maxGuests: z.number().int().positive().max(100),
+  bedSetup: z.array(bedSetupItemSchema).min(1).max(10),
+  baseRateMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  amenities: z.array(z.string().trim().min(1).max(80)).max(50).optional().default([]),
+});
+
+const roomTypeUpdateSchema = roomTypeSchema.partial().refine(
+  (roomType) => Object.keys(roomType).length > 0,
+  { message: "At least one field is required" },
+);
+
+const roomTypeListSchema = z.object({
+  includeInactive: z.enum(["true", "false"]).optional().default("false"),
+});
+
+const roomIdSchema = z.string().regex(/^[a-f\d]{24}$/i);
+
+const roomSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  roomTypeId: roomIdSchema,
+  floor: z.string().trim().max(40).optional().default(""),
+  wing: z.string().trim().max(80).optional().default(""),
+  notes: z.string().trim().max(1000).optional().default(""),
+});
+
+const roomUpdateSchema = roomSchema.partial().refine(
+  (room) => Object.keys(room).length > 0,
+  { message: "At least one field is required" },
+);
+
 module.exports = {
   actionTokenSchema,
+  bedSetupItemSchema,
   emailOnlySchema,
   hotelSchema,
   hotelStatusSchema,
@@ -126,6 +166,12 @@ module.exports = {
   planSelectionSchema,
   registrationSchema,
   resetPasswordSchema,
+  roomIdSchema,
+  roomSchema,
+  roomTypeListSchema,
+  roomTypeSchema,
+  roomTypeUpdateSchema,
+  roomUpdateSchema,
   settingsSchema,
   verificationCodeSchema,
 };

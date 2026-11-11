@@ -28,6 +28,9 @@ receive their privileges from hotel membership.
    `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, and `FRONTEND_URL`. The sender
    address must be verified in Brevo. Keep the API key only in the backend
    environment.
+5. Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
+  `CLOUDINARY_API_SECRET` for room-type photos. Keep these values only in the
+  backend environment.
 
 ## Code structure
 
@@ -54,7 +57,9 @@ expiry, issuer, and audience checks.
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant, Manager membership, and pending subscription |
-| `POST` | `/api/auth/login` | Public, rate-limited | Sign in with email/password |
+| `POST` | `/api/auth/login` | Public, rate-limited | Sign in; configured frontend origin also receives an HttpOnly refresh cookie |
+| `POST` | `/api/auth/refresh` | Configured frontend origin | Rotate refresh cookie and issue a new access token |
+| `POST` | `/api/auth/logout` | Configured frontend origin | Revoke refresh session and clear its cookie |
 | `POST` | `/api/auth/send-verification-code` | Public, rate-limited | Send a six-digit verification code |
 | `POST` | `/api/auth/verify-code` | Public | Verify an email with its six-digit code |
 | `POST` | `/api/auth/resend-verification` | Public, rate-limited | Resend a verification code after the cooldown |
@@ -65,10 +70,107 @@ expiry, issuer, and audience checks.
 | `GET` | `/api/hotels/{hotelId}/onboarding` | Hotel Manager | Read hotel status, plan, and setup progress |
 | `PUT` | `/api/hotels/{hotelId}/subscription` | Hotel Manager | Select an active plan |
 | `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update initial hotel settings |
+| `GET` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | List active room types; `includeInactive=true` includes inactive types |
+| `POST` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | Create a room type |
+| `PATCH` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Update room type details |
+| `DELETE` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Deactivate a room type |
+| `POST` | `/api/hotels/{hotelId}/room-types/{roomTypeId}/photos` | Hotel Manager | Upload up to 10 photos as multipart `photos` fields |
+| `DELETE` | `/api/hotels/{hotelId}/room-types/{roomTypeId}/photos/{photoId}` | Hotel Manager | Delete a room-type photo from Cloudinary |
+| `GET` | `/api/hotels/{hotelId}/rooms` | Hotel Manager | List active rooms and their room types; `includeInactive=true` includes inactive rooms |
+| `POST` | `/api/hotels/{hotelId}/rooms` | Hotel Manager | Create a room using an active room type in the same hotel |
+| `PATCH` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Update room code, type, floor, wing, or notes |
+| `DELETE` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Deactivate a room |
 | `GET` | `/api/platform/hotels` | Platform operator | List hotels with manager, subscription, plan, and subscription payment details |
 | `GET` | `/api/platform/hotels/pending-approval` | Platform operator | List hotels whose registering Manager has not verified email |
 | `PATCH` | `/api/platform/hotels/{hotelId}/status` | Platform operator | Activate or suspend a hotel |
 | `POST` | `/api/platform/plans` | Platform operator | Create a plan |
+
+### Session renewal
+
+Access tokens expire after 15 minutes. A successful browser login from the exact
+`FRONTEND_URL` origin keeps the existing `{ "token": "...", "user": { ... } }`
+JSON response and sets the `hotel_refresh` HttpOnly cookie. The refresh token is
+never returned in JSON or available to frontend JavaScript. Login requests
+without an `Origin` retain the access-token response for non-browser clients,
+but do not create a refresh session.
+
+The frontend should send browser credentials on login, refresh, and logout. On
+an API `401`, it should make one `POST /api/auth/refresh` request with browser
+credentials, use the returned `{ "token": "..." }` to retry the original
+request once, and return to sign-in if refresh returns `401`. Logout is
+`POST /api/auth/logout`; it returns `{ "message": "logged_out" }`. Refresh and
+logout require the request `Origin` to match `FRONTEND_URL` exactly. CORS is
+restricted to that origin and allows credentials.
+
+Refresh sessions have a 30-day absolute expiry that is not extended by token
+rotation. Each refresh token is single-use; replaying an already rotated token
+revokes that browser session family. Logout revokes the family, and password
+reset revokes all refresh sessions for the user. Refresh cookies are scoped to
+`/api/auth`, `HttpOnly`, and `SameSite=Lax` by default. For a cross-site frontend
+and API, configure `COOKIE_SAME_SITE=none` and serve over HTTPS; `Secure` is
+enabled automatically in production or can be set with `COOKIE_SECURE=true`.
+
+### Room inventory
+
+Room-type create/update bodies use `name`, optional `description`, `sizeSqm`,
+`maxGuests`, `bedSetup` (for example `[{ "type": "queen", "count": 1 }]`),
+`baseRateMinor`, and optional `amenities`. The hotel must already have a
+configured currency; the API takes it from hotel settings and does not accept a
+client-supplied currency. Names are unique per hotel after trimming and
+case-normalization. `baseRateMinor` is a non-negative integer in that currency's
+minor units.
+
+Room create/update bodies use `code`, `roomTypeId`, and optional `floor`,
+`wing`, and `notes`. Codes are unique per hotel, ignoring case. Create and type
+change operations require an active room type belonging to the same hotel.
+Room types and rooms are deactivated rather than hard-deleted. All of these
+routes require an active manager membership; platform-operator status alone is
+not sufficient.
+
+Example room-type request:
+
+```json
+{
+  "name": "Standard",
+  "description": "One queen bed",
+  "sizeSqm": 22.5,
+  "maxGuests": 2,
+  "bedSetup": [{ "type": "queen", "count": 1 }],
+  "baseRateMinor": 12500,
+  "amenities": ["Wi-Fi", "Desk"]
+}
+```
+
+`POST /api/hotels/{hotelId}/rooms` accepts:
+
+```json
+{
+  "code": "101",
+  "roomTypeId": "<room-type-id>",
+  "floor": "1",
+  "wing": "East",
+  "notes": "Near the elevator"
+}
+```
+
+The room create response is `{ "room": { "id": "...", "hotelId": "...",
+"code": "101", "roomType": { ... }, "floor": "1", "wing": "East",
+"notes": "Near the elevator", "active": true, "status": "Available" } }`.
+Room-type create returns `{ "roomType": { ... } }`; the list endpoints return
+`{ "rooms": [...] }` and `{ "roomTypes": [...] }`.
+
+Photo upload uses `multipart/form-data` with one or more `photos` image fields
+(JPEG, PNG, WebP, or AVIF; maximum 5 MiB each and 10 photos per room type).
+Images are stored in Cloudinary; MongoDB stores their Cloudinary public ID and
+secure URL. Responses contain `roomTypes`, `roomType`, `rooms`, or `room` as
+appropriate. Each room includes its related `roomType` and `status`.
+
+Reservations, assigned-room records, and check-in/stay records are not yet
+implemented. Consequently room status currently returns `Available`; it cannot
+derive `Reserved` or `Occupied`, apply hotel-local stay dates, or enforce
+date-overlap booking conflicts until the existing reservation workflow gains a
+physical-room relationship. This API does not create a parallel reservation
+system.
 
 Hotel registration body:
 

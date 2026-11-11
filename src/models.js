@@ -28,6 +28,19 @@ const authActionTokenSchema = new Schema({
 authActionTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 authActionTokenSchema.index({ userId: 1, purpose: 1, consumedAt: 1 });
 
+const refreshSessionSchema = new Schema({
+  userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  sessionId: { type: Schema.Types.ObjectId, required: true, index: true },
+  tokenHash: { type: String, required: true, unique: true },
+  authVersion: { type: Number, required: true, min: 0 },
+  expiresAt: { type: Date, required: true },
+  consumedAt: { type: Date, default: null },
+  revokedAt: { type: Date, default: null },
+  replacedByTokenHash: { type: String, default: null },
+}, { timestamps: true });
+refreshSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+refreshSessionSchema.index({ userId: 1, revokedAt: 1, consumedAt: 1 });
+
 const hotelSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -67,6 +80,46 @@ const membershipSchema = new Schema({
 }, { timestamps: true });
 membershipSchema.index({ hotelId: 1, userId: 1 }, { unique: true });
 membershipSchema.index({ userId: 1, status: 1 });
+
+const roomTypeSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
+  name: { type: String, required: true, trim: true, maxlength: 120 },
+  nameKey: { type: String, required: true },
+  description: { type: String, default: "", maxlength: 2000 },
+  sizeSqm: { type: Number, required: true, min: Number.EPSILON },
+  maxGuests: { type: Number, required: true, min: 1 },
+  bedSetup: [{
+    type: { type: String, required: true, trim: true, maxlength: 40 },
+    count: { type: Number, required: true, min: 1 },
+  }],
+  baseRateMinor: { type: Number, required: true, min: 0 },
+  currency: { type: String, required: true, uppercase: true, match: /^[A-Z]{3}$/ },
+  amenities: { type: [String], default: [] },
+  photos: [{
+    publicId: { type: String, required: true },
+    secureUrl: { type: String, required: true },
+    width: Number,
+    height: Number,
+    format: String,
+    bytes: Number,
+  }],
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
+roomTypeSchema.index({ hotelId: 1, nameKey: 1 }, { unique: true });
+roomTypeSchema.index({ hotelId: 1, active: 1 });
+
+const roomSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
+  code: { type: String, required: true, trim: true, maxlength: 40 },
+  codeKey: { type: String, required: true },
+  roomTypeId: { type: Schema.Types.ObjectId, ref: "RoomType", required: true },
+  floor: { type: String, trim: true, maxlength: 40, default: "" },
+  wing: { type: String, trim: true, maxlength: 80, default: "" },
+  notes: { type: String, trim: true, maxlength: 1000, default: "" },
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
+roomSchema.index({ hotelId: 1, codeKey: 1 }, { unique: true });
+roomSchema.index({ hotelId: 1, roomTypeId: 1, active: 1 });
 
 const operatorSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
@@ -156,6 +209,9 @@ module.exports = {
   PlatformOperator: mongoose.models.PlatformOperator || mongoose.model("PlatformOperator", operatorSchema),
   Plan: mongoose.models.Plan || mongoose.model("Plan", planSchema),
   PlanPrice: mongoose.models.PlanPrice || mongoose.model("PlanPrice", planPriceSchema),
+  RefreshSession: mongoose.models.RefreshSession || mongoose.model("RefreshSession", refreshSessionSchema),
+  Room: mongoose.models.Room || mongoose.model("Room", roomSchema),
+  RoomType: mongoose.models.RoomType || mongoose.model("RoomType", roomTypeSchema),
   Subscription: mongoose.models.Subscription || mongoose.model("Subscription", subscriptionSchema),
   SubscriptionPayment: mongoose.models.SubscriptionPayment || mongoose.model("SubscriptionPayment", subscriptionPaymentSchema),
   User: mongoose.models.User || mongoose.model("User", userSchema),

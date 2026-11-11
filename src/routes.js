@@ -3,6 +3,8 @@ const { rateLimit } = require("express-rate-limit");
 const authController = require("./controllers/auth-controller");
 const hotelController = require("./controllers/hotel-controller");
 const platformController = require("./controllers/platform-controller");
+const roomController = require("./controllers/room-controller");
+const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
   authenticate,
   requireManager,
@@ -29,6 +31,12 @@ const registrationLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -40,6 +48,8 @@ router.get("/api/public/plans", hotelController.publicPlans);
 
 router.post("/api/auth/register", registrationLimiter, authController.register);
 router.post("/api/auth/login", loginLimiter, authController.login);
+router.post("/api/auth/refresh", refreshLimiter, authController.refresh);
+router.post("/api/auth/logout", authController.logout);
 router.post("/api/auth/send-verification-code", recoveryLimiter, authController.resendVerification);
 router.post("/api/auth/verify-code", authController.verifyCode);
 router.post("/api/auth/resend-verification", recoveryLimiter, authController.resendVerification);
@@ -66,6 +76,68 @@ router.patch(
   requireManager,
   requireSubscriptionWriteAccess,
   hotelController.updateSettings,
+);
+
+router.get(
+  "/api/hotels/:hotelId/room-types",
+  authenticate,
+  requireManager,
+  roomController.listRoomTypes,
+);
+router.post(
+  "/api/hotels/:hotelId/room-types",
+  authenticate,
+  requireManager,
+  roomController.createRoomType,
+);
+router.patch(
+  "/api/hotels/:hotelId/room-types/:roomTypeId",
+  authenticate,
+  requireManager,
+  roomController.updateRoomType,
+);
+router.delete(
+  "/api/hotels/:hotelId/room-types/:roomTypeId",
+  authenticate,
+  requireManager,
+  roomController.deactivateRoomType,
+);
+router.post(
+  "/api/hotels/:hotelId/room-types/:roomTypeId/photos",
+  authenticate,
+  requireManager,
+  parseRoomPhotos,
+  roomController.uploadRoomTypePhotos,
+);
+router.delete(
+  "/api/hotels/:hotelId/room-types/:roomTypeId/photos/:photoId",
+  authenticate,
+  requireManager,
+  roomController.removeRoomTypePhoto,
+);
+router.get(
+  "/api/hotels/:hotelId/rooms",
+  authenticate,
+  requireManager,
+  roomController.listRooms,
+);
+router.post(
+  "/api/hotels/:hotelId/rooms",
+  authenticate,
+  requireManager,
+  roomController.createRoom,
+);
+router.patch(
+  "/api/hotels/:hotelId/rooms/:roomId",
+  authenticate,
+  requireManager,
+  roomController.updateRoom,
+);
+router.delete(
+  "/api/hotels/:hotelId/rooms/:roomId",
+  authenticate,
+  requireManager,
+  roomController.deactivateRoom,
 );
 
 router.get(

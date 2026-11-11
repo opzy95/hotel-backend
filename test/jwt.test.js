@@ -28,7 +28,7 @@ test("signs and verifies an HS256 access token with the expected claims", () => 
   assert.equal(payload.iss, "hotel-backend");
   assert.equal(payload.aud, "hotel-frontend");
   assert.equal(payload.ver, 0);
-  assert.ok(payload.exp > payload.iat);
+  assert.equal(payload.exp - payload.iat, 15 * 60);
   assert.equal(jwt.decode(token, { complete: true }).header.alg, "HS256");
 });
 

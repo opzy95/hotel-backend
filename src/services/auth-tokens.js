@@ -5,9 +5,23 @@ const TOKEN_LIFETIMES = {
   password_reset: 60 * 60 * 1000,
 };
 const VERIFICATION_CODE_LIFETIME = 10 * 60 * 1000;
+const REFRESH_SESSION_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 
 function hashActionToken(token) {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function hashRefreshToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function createRefreshToken(expiresAt = new Date(Date.now() + REFRESH_SESSION_LIFETIME)) {
+  const token = randomBytes(32).toString("base64url");
+  return {
+    token,
+    tokenHash: hashRefreshToken(token),
+    expiresAt,
+  };
 }
 
 async function issueAuthActionToken(userId, purpose) {
@@ -78,7 +92,9 @@ async function issueEmailVerificationCode(userId) {
 }
 
 module.exports = {
+  createRefreshToken,
   hashActionToken,
+  hashRefreshToken,
   hashVerificationCode,
   issueAuthActionToken,
   issueEmailVerificationCode,

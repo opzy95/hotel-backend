@@ -6,10 +6,13 @@ const {
   Hotel,
   HotelMembership,
   PlatformOperator,
+  RefreshSession,
   User,
 } = require("../models");
 const {
   hashActionToken,
+  createRefreshToken,
+  hashRefreshToken,
   hashVerificationCode,
   issueAuthActionToken,
   issueEmailVerificationCode,
@@ -65,7 +68,7 @@ async function register(data, sendVerificationEmail) {
   return result;
 }
 
-async function login(data) {
+async function login(data, { issueRefreshSession = true } = {}) {
   const user = await User.findOne({
     email: data.email.toLowerCase(),
   }).select("+passwordHash");
@@ -82,10 +85,118 @@ async function login(data) {
   ) {
     return { error: "email_not_verified" };
   }
-  return {
+  const result = {
     token: signAccessToken(user._id, user.authVersion),
     user: publicUser(user),
   };
+  if (issueRefreshSession) {
+    const sessionId = new mongoose.Types.ObjectId();
+    const refresh = createRefreshToken();
+    await RefreshSession.create({
+      userId: user._id,
+      sessionId,
+      tokenHash: refresh.tokenHash,
+      authVersion: user.authVersion,
+      expiresAt: refresh.expiresAt,
+    });
+    result.refreshToken = refresh.token;
+    result.refreshExpiresAt = refresh.expiresAt;
+  }
+  return result;
+}
+
+async function revokeRefreshSessionFamily(sessionId) {
+  await RefreshSession.updateMany(
+    { sessionId, revokedAt: null },
+    { $set: { revokedAt: new Date() } },
+  );
+}
+
+async function refreshLogin(refreshToken) {
+  if (typeof refreshToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(refreshToken)) {
+    return { error: "invalid_refresh_token" };
+  }
+  const existing = await RefreshSession.findOne({ tokenHash: hashRefreshToken(refreshToken) });
+  if (!existing || existing.revokedAt || existing.expiresAt <= new Date()) {
+    return { error: "invalid_refresh_token" };
+  }
+  if (existing.consumedAt) {
+    await revokeRefreshSessionFamily(existing.sessionId);
+    return { error: "invalid_refresh_token" };
+  }
+
+  const now = new Date();
+  const replacement = createRefreshToken(existing.expiresAt);
+  const mongoSession = await mongoose.startSession();
+  let result;
+  try {
+    await mongoSession.withTransaction(async () => {
+      const current = await RefreshSession.findOneAndUpdate(
+        {
+          _id: existing._id,
+          consumedAt: null,
+          revokedAt: null,
+          expiresAt: { $gt: now },
+        },
+        {
+          $set: {
+            consumedAt: now,
+            replacedByTokenHash: replacement.tokenHash,
+          },
+        },
+        { returnDocument: "after", session: mongoSession },
+      );
+      if (!current) {
+        return;
+      }
+      const user = await User.findOne({
+        _id: current.userId,
+        authVersion: current.authVersion,
+      }).session(mongoSession);
+      if (!user) {
+        await RefreshSession.updateMany(
+          { sessionId: current.sessionId, revokedAt: null },
+          { $set: { revokedAt: now } },
+          { session: mongoSession },
+        );
+        return;
+      }
+      await RefreshSession.create([{
+        userId: current.userId,
+        sessionId: current.sessionId,
+        tokenHash: replacement.tokenHash,
+        authVersion: current.authVersion,
+        expiresAt: current.expiresAt,
+      }], { session: mongoSession });
+      result = {
+        token: signAccessToken(user._id, user.authVersion),
+        refreshToken: replacement.token,
+        refreshExpiresAt: current.expiresAt,
+      };
+    });
+  } finally {
+    await mongoSession.endSession();
+  }
+
+  if (result) {
+    return result;
+  }
+  const latest = await RefreshSession.findById(existing._id).select("consumedAt sessionId");
+  if (latest?.consumedAt) {
+    await revokeRefreshSessionFamily(latest.sessionId);
+  }
+  return { error: "invalid_refresh_token" };
+}
+
+async function logout(refreshToken) {
+  if (typeof refreshToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(refreshToken)) {
+    return;
+  }
+  const record = await RefreshSession.findOne({ tokenHash: hashRefreshToken(refreshToken) })
+    .select("sessionId");
+  if (record) {
+    await revokeRefreshSessionFamily(record.sessionId);
+  }
 }
 
 async function verifyEmailCode(email, code) {
@@ -256,6 +367,11 @@ async function resetPassword(token, password) {
         { $set: { passwordHash }, $inc: { authVersion: 1 } },
         { session },
       );
+      await RefreshSession.updateMany(
+        { userId: actionToken.userId, revokedAt: null },
+        { $set: { revokedAt: new Date() } },
+        { session },
+      );
       reset = update.matchedCount === 1;
     });
   } finally {
@@ -288,6 +404,8 @@ module.exports = {
   EmailDeliveryError,
   getCurrentUser,
   login,
+  logout,
+  refreshLogin,
   register,
   resendVerification,
   resetPassword,

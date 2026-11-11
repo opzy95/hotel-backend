@@ -7,6 +7,12 @@ const {
   verificationCodeSchema,
 } = require("../schemas");
 const { publicHotel, publicUser } = require("../utils/public-resources");
+const {
+  REFRESH_COOKIE_NAME,
+  clearRefreshCookie,
+  isTrustedFrontendOrigin,
+  setRefreshCookie,
+} = require("../utils/refresh-cookie");
 
 function validationDetails(issues) {
   return issues.map(({ path, message }) => ({
@@ -56,14 +62,45 @@ async function login(req, res) {
   if (!parsed.success) {
     return res.status(400).json({ error: "invalid_credentials" });
   }
-  const result = await authService.login(parsed.data);
+  if (req.get("origin") && !isTrustedFrontendOrigin(req)) {
+    return res.status(403).json({ error: "untrusted_origin" });
+  }
+  const result = await authService.login(parsed.data, {
+    issueRefreshSession: isTrustedFrontendOrigin(req),
+  });
   if (result.error === "invalid_credentials") {
     return res.status(401).json({ error: result.error });
   }
   if (result.error === "email_not_verified") {
     return res.status(403).json({ error: result.error });
   }
-  return res.json(result);
+  const { refreshToken, refreshExpiresAt, ...response } = result;
+  if (refreshToken) {
+    setRefreshCookie(res, refreshToken, refreshExpiresAt);
+  }
+  return res.json(response);
+}
+
+async function refresh(req, res) {
+  if (!isTrustedFrontendOrigin(req)) {
+    return res.status(403).json({ error: "untrusted_origin" });
+  }
+  const result = await authService.refreshLogin(req.cookies?.[REFRESH_COOKIE_NAME]);
+  if (result.error) {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: result.error });
+  }
+  setRefreshCookie(res, result.refreshToken, result.refreshExpiresAt);
+  return res.json({ token: result.token });
+}
+
+async function logout(req, res) {
+  if (!isTrustedFrontendOrigin(req)) {
+    return res.status(403).json({ error: "untrusted_origin" });
+  }
+  await authService.logout(req.cookies?.[REFRESH_COOKIE_NAME]);
+  clearRefreshCookie(res);
+  return res.json({ message: "logged_out" });
 }
 
 async function verifyCode(req, res) {
@@ -149,7 +186,9 @@ module.exports = {
   currentUser,
   forgotPassword,
   login,
+  logout,
   register,
+  refresh,
   resendVerification,
   resetPassword,
   verifyCode,

@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 
 const ISSUER = "hotel-backend";
 const AUDIENCE = "hotel-frontend";
-const ACCESS_TOKEN_TTL = "1h";
+const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
 function getSecret() {
   const secret = process.env.JWT_SECRET;
@@ -30,7 +30,7 @@ function signAccessToken(userId, tokenVersion = 0) {
     subject,
     issuer: ISSUER,
     audience: AUDIENCE,
-    expiresIn: ACCESS_TOKEN_TTL,
+    expiresIn: ACCESS_TOKEN_TTL_SECONDS,
   });
 }
 
@@ -52,6 +52,7 @@ function isJwtVerificationError(error) {
 
 module.exports = {
   assertJwtConfig,
+  ACCESS_TOKEN_TTL_SECONDS,
   isJwtVerificationError,
   signAccessToken,
   verifyAccessToken,

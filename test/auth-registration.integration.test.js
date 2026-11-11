@@ -25,6 +25,7 @@ test("hotel registration creates a Manager who can log in", {
     Plan,
     PlanPrice,
     PlatformOperator,
+    RefreshSession,
     Subscription,
     User,
   } = require("../src/models");
@@ -182,12 +183,16 @@ test("hotel registration creates a Manager who can log in", {
 
     const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        origin: new URL(process.env.FRONTEND_URL).origin,
+      },
       body: JSON.stringify({ email: managerEmail, password }),
     });
     assert.equal(loginResponse.status, 200);
     const login = await loginResponse.json();
     assert.ok(login.token);
+    const managerRefreshCookie = loginResponse.headers.get("set-cookie").split(";", 1)[0];
 
     const meResponse = await fetch(`${baseUrl}/api/auth/me`, {
       headers: { authorization: `Bearer ${login.token}` },
@@ -355,6 +360,14 @@ test("hotel registration creates a Manager who can log in", {
       body: JSON.stringify({ token: resetEmail.token, password: resetPassword }),
     });
     assert.equal(resetPasswordResponse.status, 200);
+    const refreshAfterPasswordReset = await fetch(`${baseUrl}/api/auth/refresh`, {
+      method: "POST",
+      headers: {
+        origin: new URL(process.env.FRONTEND_URL).origin,
+        cookie: managerRefreshCookie,
+      },
+    });
+    assert.equal(refreshAfterPasswordReset.status, 401);
 
     const oldPasswordLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
@@ -396,6 +409,7 @@ test("hotel registration creates a Manager who can log in", {
     }
     await AuditLog.deleteMany({ targetId: { $in: hotelIds } });
     await AuthActionToken.deleteMany({ userId: { $in: [userId, operatorUserId].filter(Boolean) } });
+    await RefreshSession.deleteMany({ userId: { $in: [userId, operatorUserId].filter(Boolean) } });
     await PlatformOperator.deleteMany({ userId: operatorUserId });
     await Subscription.deleteMany({ hotelId: { $in: hotelIds } });
     if (planId) {

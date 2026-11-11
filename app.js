@@ -1,6 +1,8 @@
 require("dotenv").config();
 
 const express = require("express");
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const { Hotel } = require("./src/models");
 const { assertJwtConfig } = require("./src/utils/jwt");
@@ -8,15 +10,32 @@ const {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } = require("./src/services/brevo-email");
+const cloudinaryStorage = require("./src/services/cloudinary-storage");
 const routes = require("./src/routes");
 const { ensurePublicPlans } = require("./src/services/plan-seed");
 
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
+  let allowedOrigin = false;
+  try {
+    allowedOrigin = process.env.FRONTEND_URL
+      ? new URL(process.env.FRONTEND_URL).origin
+      : false;
+  } catch {
+    allowedOrigin = false;
+  }
+  app.use(cors({
+    origin: allowedOrigin,
+    credentials: true,
+    allowedHeaders: ["Authorization", "Content-Type"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  }));
+  app.use(cookieParser());
   app.use(express.json({ limit: "32kb" }));
   app.locals.sendVerificationCodeEmail = sendVerificationEmail;
   app.locals.sendPasswordResetEmail = sendPasswordResetEmail;
+  app.locals.roomPhotoStorage = cloudinaryStorage;
   app.use(routes);
 
   app.use((err, _req, res, _next) => {
@@ -25,6 +44,17 @@ function createApp() {
     }
     if (err?.type === "entity.too.large") {
       return res.status(413).json({ error: "request_too_large" });
+    }
+    if (err?.name === "MulterError") {
+      return res.status(err.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+        error: err.code === "LIMIT_FILE_SIZE" ? "request_too_large" : "invalid_photo_upload",
+      });
+    }
+    if (err?.message === "unsupported_image_type") {
+      return res.status(400).json({ error: "unsupported_image_type" });
+    }
+    if (err?.name === "CloudStorageConfigurationError" || err?.name === "CloudStorageError") {
+      return res.status(503).json({ error: "cloud_storage_unavailable" });
     }
     if (err?.code === 11000) {
       return res.status(409).json({ error: "resource_already_exists" });
