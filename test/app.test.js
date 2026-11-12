@@ -105,3 +105,62 @@ test("protected endpoints reject requests without a bearer token", async () => {
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "authentication_required");
 });
+
+test("public reservation rejects impossible stay dates before database access", async () => {
+  const response = await fetch(`${baseUrl}/api/public/reservations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      hotelSlug: "sample-hotel",
+      guestName: "Guest Example",
+      guestEmail: "guest@example.com",
+      guestPhone: "+10000000000",
+      checkIn: "2026-02-31",
+      checkOut: "2026-03-02",
+      roomTypeId: "0123456789abcdef01234567",
+      adults: 1,
+      children: 0,
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "validation_error");
+});
+
+test("public reservation lookup requires a valid reference and email", async () => {
+  const response = await fetch(`${baseUrl}/api/public/reservations/lookup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reference: "short", email: "not-an-email" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "validation_error");
+});
+
+test("admin reservation routes require authentication", async () => {
+  const response = await fetch(`${baseUrl}/api/hotels/not-an-id/reservations`);
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});
+
+test("admin reservation availability requires authentication", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/reservations/availability`,
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});
+
+test("admin reservation payment routes require authentication", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/reservations/not-an-id/payments`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});
+
+test("admin guest profile routes require authentication", async () => {
+  const response = await fetch(`${baseUrl}/api/hotels/not-an-id/guests`);
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});

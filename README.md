@@ -80,6 +80,16 @@ expiry, issuer, and audience checks.
 | `POST` | `/api/hotels/{hotelId}/rooms` | Hotel Manager | Create a room using an active room type in the same hotel |
 | `PATCH` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Update room code, type, floor, wing, or notes |
 | `DELETE` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Deactivate a room |
+| `GET` | `/api/hotels/{hotelId}/guests` | Hotel Manager | List hotel-scoped guest profiles with pagination and optional search/tier filters |
+| `PATCH` | `/api/hotels/{hotelId}/guests/{guestId}` | Hotel Manager | Update a guest's country or membership tier |
+| `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug |
+| `POST` | `/api/public/reservations/lookup` | Public, rate-limited | Retrieve a reservation with its reference and guest email |
+| `GET` | `/api/hotels/{hotelId}/reservations` | Hotel Manager | List reservations with pagination and optional search/status/check-in-date filters |
+| `POST` | `/api/hotels/{hotelId}/reservations` | Hotel Manager | Create an admin reservation and assign a physical room |
+| `GET` | `/api/hotels/{hotelId}/reservations/availability` | Hotel Manager | Check available rooms and server-calculated pricing for a stay and room type |
+| `GET` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Hotel Manager | List recorded payments and current payment summary |
+| `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Hotel Manager | Record a full or partial admin-collected payment |
+| `PATCH` | `/api/hotels/{hotelId}/reservations/{reservationId}` | Hotel Manager | Update guest, stay, room assignment, or reservation status |
 | `GET` | `/api/platform/hotels` | Platform operator | List hotels with manager, subscription, plan, and subscription payment details |
 | `GET` | `/api/platform/hotels/pending-approval` | Platform operator | List hotels whose registering Manager has not verified email |
 | `PATCH` | `/api/platform/hotels/{hotelId}/status` | Platform operator | Activate or suspend a hotel |
@@ -163,14 +173,209 @@ Photo upload uses `multipart/form-data` with one or more `photos` image fields
 (JPEG, PNG, WebP, or AVIF; maximum 5 MiB each and 10 photos per room type).
 Images are stored in Cloudinary; MongoDB stores their Cloudinary public ID and
 secure URL. Responses contain `roomTypes`, `roomType`, `rooms`, or `room` as
-appropriate. Each room includes its related `roomType` and `status`.
+appropriate. Each room includes its related `roomType` and `status`. A room is
+`Occupied` when its active reservation is checked in, `Reserved` during a
+confirmed stay, and otherwise `Available`.
 
-Reservations, assigned-room records, and check-in/stay records are not yet
-implemented. Consequently room status currently returns `Available`; it cannot
-derive `Reserved` or `Occupied`, apply hotel-local stay dates, or enforce
-date-overlap booking conflicts until the existing reservation workflow gains a
-physical-room relationship. This API does not create a parallel reservation
-system.
+### Reservations
+
+Stay dates use `YYYY-MM-DD` hotel calendar dates, with check-out exclusive.
+Each reservation covers one physical room. Public creation identifies an active
+hotel by its `hotelSlug`; the server validates guest capacity and assigns an
+available room of the requested type. Admin creation uses the same fields with
+`POST /api/hotels/{hotelId}/reservations` and may include `assignedRoomId` to
+request a specific room. A room cannot have overlapping confirmed or checked-in
+reservations. Reservation writes serialize by room type in a MongoDB
+transaction, so the deployment must use a replica set (as required for signup).
+
+The server ignores client-supplied prices and calculates
+`roomType.baseRateMinor * nights`, storing the rate, currency, and total as a
+snapshot in integer minor units. No taxes, discounts, or payment-provider
+processing is applied. New reservations are `confirmed`; a nonzero total starts
+as `unpaid`, while a zero total is immediately settled.
+Reservation payment status is derived from recorded amounts: `unpaid`,
+`partially_paid`, or `paid`. Reservation statuses are `confirmed`, `cancelled`,
+`checked_in`, `checked_out`, and `no_show`. A cancelled or no-show reservation
+can be confirmed again only if the room remains available; checked-in
+reservations can only be checked out.
+
+Public booking request:
+
+```json
+{
+  "hotelSlug": "grand-harbor",
+  "guestName": "Alex Example",
+  "guestEmail": "alex@example.com",
+  "guestPhone": "+33123456789",
+  "checkIn": "2027-06-10",
+  "checkOut": "2027-06-12",
+  "roomTypeId": "<room-type-id>",
+  "adults": 2,
+  "children": 0
+}
+```
+
+`POST /api/public/reservations` returns `201` with
+`{ "reservation": { "id", "reference", "guest", "checkIn", "checkOut",
+"roomType", "assignedRoom", "guests", "pricing", "paymentStatus", "status" } }`.
+The generated reference has the form `HTL-` followed by 16 hexadecimal
+characters. The server returns `400 validation_error` for invalid input,
+`404 hotel_not_found` or `404 room_type_not_found` for unknown resources, and
+`409 room_unavailable` or `409 room_guest_limit_exceeded` when inventory or
+capacity constraints fail.
+
+Example response:
+
+```json
+{
+  "reservation": {
+    "id": "<reservation-id>",
+    "hotelId": "<hotel-id>",
+    "reference": "HTL-1A2B3C4D5E6F7890",
+    "guest": {
+      "name": "Alex Example",
+      "email": "alex@example.com",
+      "phone": "+33123456789"
+    },
+    "checkIn": "2027-06-10",
+    "checkOut": "2027-06-12",
+    "roomType": { "id": "<room-type-id>", "name": "Standard" },
+    "assignedRoom": { "id": "<room-id>", "code": "101" },
+    "guests": { "adults": 2, "children": 0 },
+    "pricing": {
+      "nights": 2,
+      "rateMinorPerNight": 12500,
+      "totalMinor": 25000,
+      "currency": "USD"
+    },
+    "paymentStatus": "unpaid",
+    "status": "confirmed",
+    "source": "public"
+  }
+}
+```
+
+`POST /api/public/reservations/lookup` accepts
+`{ "reference": "HTL-...", "email": "alex@example.com" }`. Both values must
+match; an unknown reference or mismatched email returns
+`404 reservation_not_found`. Both public endpoints are rate-limited.
+
+Managers can use `GET /api/hotels/{hotelId}/reservations?page=1&limit=25` with
+optional `search`, `status`, `checkInFrom`, and `checkInTo` filters. Responses
+contain `reservations` and `{ "page", "limit", "total", "pages" }` pagination.
+Admin reservation objects include `guest.id`, `guest.country`,
+`guest.membershipTier`, and `guest.createdAt` alongside guest name, email, and
+phone. Guest profiles are hotel-scoped and matched by normalized email.
+Country and membership tier are `null` until provided; the backend does not
+infer them. Existing reservations are linked to profiles during startup
+backfill; those profile creation timestamps indicate when the profile was
+backfilled, not the original reservation date.
+
+The admin reservation `guest` object is:
+
+```json
+{
+  "id": "<guest-id>",
+  "name": "Alex Example",
+  "email": "alex@example.com",
+  "phone": "+33123456789",
+  "country": null,
+  "membershipTier": null,
+  "createdAt": "2026-11-12T10:30:00.000Z"
+}
+```
+
+`GET /api/hotels/{hotelId}/guests?page=1&limit=25` lists profiles and accepts
+optional `search` and `membershipTier` filters. `PATCH /api/hotels/{hotelId}/guests/{guestId}`
+accepts `country` as a two-letter ISO
+country code and/or `membershipTier` as a hotel-defined string; either can be
+set to `null` to clear it. Admin reservation creation and updates may also
+provide `guestCountry`.
+
+Load categories from `GET /api/hotels/{hotelId}/room-types`, then check
+availability before selecting an assigned room:
+
+```http
+GET /api/hotels/{hotelId}/reservations/availability?checkIn=2027-06-10&checkOut=2027-06-12&roomTypeId=<room-type-id>&adults=2&children=0
+```
+
+The availability response contains the requested `stay`, `roomType`, and
+`guests`, an `availableRooms` array with `{ "id", "code" }` entries, and
+`pricing` with `{ "nights", "rateMinorPerNight", "totalMinor", "currency" }`.
+The array is empty when there is no available room. Requests exceeding the
+category's guest limit return `409 room_guest_limit_exceeded`. This is a
+point-in-time check: reservation creation checks inventory again, so the UI must
+handle `409 room_unavailable` if another booking wins the room before save.
+Availability, creation, and listing routes all require an active manager
+membership for the hotel.
+
+`PATCH /api/hotels/{hotelId}/reservations/{reservationId}` accepts partial guest
+details, both `checkIn` and `checkOut` together, `roomTypeId` with an optional
+`assignedRoomId`, guest counts, or `status`. Payment status cannot be set
+directly.
+
+Record a full or partial admin-collected payment with
+`POST /api/hotels/{hotelId}/reservations/{reservationId}/payments`:
+
+```json
+{
+  "amountMinor": 10000,
+  "method": "cash",
+  "reference": null,
+  "note": "Deposit collected at front desk",
+  "idempotencyKey": "b9e87092-9b25-4e8d-a330-0fa5c96615db"
+}
+```
+
+`amountMinor` is a positive integer in the reservation currency's minor units.
+Supported methods are `cash`, `card`, `bank_transfer`, `mobile_money`, and
+`other`. The server rejects overpayments and derives the remaining balance.
+The idempotency key must be a UUID; retrying the same request returns the
+existing payment without adding it twice. A new payment returns `201`; an
+identical retry returns `200`.
+
+The payment response contains `payment` with `id`, `amountMinor`, `currency`,
+`method`, `reference`, `note`, `idempotencyKey`, `receivedAt`, and `receivedBy`
+(`id` and `name`), plus `paymentSummary` with `totalMinor`, `paidMinor`,
+`balanceDueMinor`, and `paymentStatus`. For example:
+
+```json
+{
+  "payment": {
+    "id": "<payment-id>",
+    "amountMinor": 10000,
+    "currency": "USD",
+    "method": "cash",
+    "reference": null,
+    "note": "Deposit collected at front desk",
+    "idempotencyKey": "b9e87092-9b25-4e8d-a330-0fa5c96615db",
+    "receivedAt": "2026-11-12T11:30:00.000Z",
+    "receivedBy": {
+      "id": "<user-id>",
+      "name": "Hotel Manager"
+    }
+  },
+  "paymentSummary": {
+    "totalMinor": 25000,
+    "paidMinor": 10000,
+    "balanceDueMinor": 15000,
+    "paymentStatus": "partially_paid"
+  }
+}
+```
+
+`GET /api/hotels/{hotelId}/reservations/{reservationId}/payments` returns
+`{ "payments": [...], "paymentSummary": { ... } }`. Admin reservation objects
+also include `paymentSummary`. Payment records are append-only; payment
+reversals/refunds and gateway processing are not implemented. Manager
+reservation and payment operations require an active manager membership for
+that hotel; an arbitrary `hotelId` does not grant access.
+
+The local API base URL is `http://localhost:3000/api` unless `PORT` is
+configured. In deployment, use the backend origin with the `/api` prefix. For
+browser clients, configure `FRONTEND_URL` to the exact frontend origin so CORS
+allows it; additional public-booking frontend origins require an explicit CORS
+configuration change.
 
 Hotel registration body:
 
@@ -259,11 +464,11 @@ when the backend starts.
 
 ## Not included in this first slice
 
-Payment-provider checkout/webhooks, staff invitations/email delivery, hotel
-domains, room inventory, bookings, guest records, and audit-log browsing are
-not implemented yet. Do not treat
-`pending` as proof that a payment succeeded. Paid plans without a trial
-cannot be activated until payment processing is integrated. The hotel
+Payment-provider checkout/webhooks, dynamic or seasonal room pricing, booking
+confirmation emails, staff invitations/email delivery, custom hotel domains,
+and audit-log browsing are not implemented yet. Do not treat
+`pending` as proof that a subscription payment succeeded. Paid plans without a
+trial cannot be activated until payment processing is integrated. The hotel
 registration address requires a two-letter country code; currency uses a
 three-letter ISO code and prices are integer minor units.
 
@@ -271,8 +476,8 @@ Before production signup, configure and test Brevo delivery and abuse
 protections. Use HTTPS for the production `FRONTEND_URL`. Plan availability
 and pricing should be reviewed before publishing plans.
 
-Run the API tenant-isolation integration test against a dedicated replica-set
-test database by setting `TEST_MONGO_URI` to a database whose name ends in
-`_test`. The registration/login and tenant-isolation integration tests clean up
-only the records they create. Without that setting, the integration tests are
-skipped; the remaining HTTP validation/health tests run without MongoDB.
+Run the API integration tests against a dedicated replica-set test database by
+setting `TEST_MONGO_URI` to a database whose name ends in `_test`. Integration
+tests clean up only the records they create. Without that setting, the
+integration tests are skipped; the remaining HTTP validation/health tests run
+without MongoDB.

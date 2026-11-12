@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { Hotel, Room, RoomType } = require("../models");
+const { Hotel, Reservation, Room, RoomType } = require("../models");
 
 const MAX_ROOM_TYPE_PHOTOS = 10;
 
@@ -28,7 +28,7 @@ function roomTypeResource(roomType) {
   };
 }
 
-function roomResource(room) {
+function roomResource(room, status = "Available") {
   return {
     id: room._id,
     hotelId: room.hotelId,
@@ -38,7 +38,7 @@ function roomResource(room) {
     wing: room.wing,
     notes: room.notes,
     active: room.active,
-    status: "Available",
+    status,
     createdAt: room.createdAt,
     updatedAt: room.updatedAt,
   };
@@ -118,11 +118,45 @@ async function listRooms(hotelId, includeInactive = false) {
   if (!includeInactive) {
     filter.active = true;
   }
-  const rooms = await Room.find(filter)
-    .populate("roomTypeId")
-    .sort({ codeKey: 1 })
-    .lean();
-  return rooms.map(roomResource);
+  const [rooms, hotel] = await Promise.all([
+    Room.find(filter)
+      .populate("roomTypeId")
+      .sort({ codeKey: 1 })
+      .lean(),
+    Hotel.findById(hotelId).select("settings.timezone").lean(),
+  ]);
+  if (!hotel) {
+    return [];
+  }
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: hotel.settings?.timezone || "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const today = `${dateParts.find((part) => part.type === "year").value}-${dateParts.find((part) => part.type === "month").value}-${dateParts.find((part) => part.type === "day").value}`;
+  const todayDate = new Date(`${today}T00:00:00.000Z`);
+  const roomIds = rooms.map((room) => room._id);
+  const reservations = roomIds.length
+    ? await Reservation.find({
+      hotelId,
+      roomId: { $in: roomIds },
+      status: { $in: ["confirmed", "checked_in"] },
+      checkIn: { $lte: todayDate },
+      checkOut: { $gt: todayDate },
+    }).select("roomId status").lean()
+    : [];
+  const statusByRoomId = new Map();
+  for (const reservation of reservations) {
+    const status = reservation.status === "checked_in" ? "Occupied" : "Reserved";
+    if (status === "Occupied" || !statusByRoomId.has(reservation.roomId.toString())) {
+      statusByRoomId.set(reservation.roomId.toString(), status);
+    }
+  }
+  return rooms.map((room) => roomResource(
+    room,
+    statusByRoomId.get(room._id.toString()) || "Available",
+  ));
 }
 
 async function findActiveRoomType(hotelId, roomTypeId) {

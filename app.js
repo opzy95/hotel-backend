@@ -5,6 +5,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const { Hotel } = require("./src/models");
+const { backfillLegacyReservationGuests } = require("./src/services/guest-service");
 const { assertJwtConfig } = require("./src/utils/jwt");
 const {
   sendPasswordResetEmail,
@@ -87,6 +88,7 @@ if (require.main === module) {
         { status: "approved" },
         { $set: { status: "active" } },
       );
+      await backfillLegacyReservationGuests();
       await ensurePublicPlans();
       app.listen(port, () => {
         console.log(`Hotel backend listening on port ${port}`);

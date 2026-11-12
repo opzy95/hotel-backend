@@ -85,7 +85,14 @@ const planSchema = z.object({
 }).passthrough();
 
 const settingsSchema = z.object({
-  timezone: z.string().trim().min(1).max(80).optional(),
+  timezone: z.string().trim().min(1).max(80).refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }, { message: "Invalid timezone" }).optional(),
   locale: z.string().trim().min(2).max(20).optional(),
   currency: z.string().trim().regex(/^[A-Z]{3}$/).optional(),
   checkInTime: z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
@@ -154,17 +161,140 @@ const roomUpdateSchema = roomSchema.partial().refine(
   { message: "At least one field is required" },
 );
 
+const reservationFields = {
+  guestName: z.string().trim().min(2).max(120),
+  guestEmail: z.string().trim().email().max(254),
+  guestPhone: z.string().trim().min(3).max(40),
+  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  roomTypeId: roomIdSchema,
+  adults: z.number().int().min(1).max(100),
+  children: z.number().int().min(0).max(100).default(0),
+};
+
+function validDateOnly(value) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validStayDates(reservation) {
+  return validDateOnly(reservation.checkIn)
+    && validDateOnly(reservation.checkOut)
+    && reservation.checkOut > reservation.checkIn;
+}
+
+const publicReservationSchema = z.object({
+  hotelSlug: z.string().trim().min(2).max(120),
+  ...reservationFields,
+}).refine(validStayDates, {
+  message: "Check-out must be after check-in",
+  path: ["checkOut"],
+});
+
+const adminReservationSchema = z.object({
+  ...reservationFields,
+  assignedRoomId: roomIdSchema.optional(),
+  guestCountry: z.string().trim().regex(/^[A-Za-z]{2}$/).optional(),
+}).refine(validStayDates, {
+  message: "Check-out must be after check-in",
+  path: ["checkOut"],
+});
+
+const reservationLookupSchema = z.object({
+  reference: z.string().trim().min(8).max(40),
+  email: z.string().trim().email().max(254),
+});
+
+const reservationListSchema = paginationSchema.extend({
+  search: z.string().trim().max(100).optional(),
+  status: z.enum(["confirmed", "cancelled", "checked_in", "checked_out", "no_show"]).optional(),
+  checkInFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  checkInTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+}).refine(
+  (query) => (!query.checkInFrom || validDateOnly(query.checkInFrom))
+    && (!query.checkInTo || validDateOnly(query.checkInTo)),
+  { message: "Invalid calendar date", path: ["checkInFrom"] },
+).refine(
+  (query) => !query.checkInFrom || !query.checkInTo || query.checkInFrom <= query.checkInTo,
+  { message: "checkInTo must not be before checkInFrom", path: ["checkInTo"] },
+);
+
+const reservationAvailabilitySchema = z.object({
+  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  roomTypeId: roomIdSchema,
+  adults: z.coerce.number().int().min(1).max(100),
+  children: z.coerce.number().int().min(0).max(100).default(0),
+}).refine(validStayDates, {
+  message: "Check-out must be after check-in",
+  path: ["checkOut"],
+});
+
+const reservationPaymentSchema = z.object({
+  amountMinor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  method: z.enum(["cash", "card", "bank_transfer", "mobile_money", "other"]),
+  reference: z.string().trim().max(120).nullable().optional().default(null),
+  note: z.string().trim().max(500).optional().default(""),
+  idempotencyKey: z.string().uuid(),
+});
+
+const guestListSchema = paginationSchema.extend({
+  search: z.string().trim().max(100).optional(),
+  membershipTier: z.string().trim().min(1).max(40).optional(),
+});
+
+const guestProfileUpdateSchema = z.object({
+  country: z.string().trim().regex(/^[A-Za-z]{2}$/).nullable().optional(),
+  membershipTier: z.string().trim().min(1).max(40).nullable().optional(),
+}).refine((profile) => Object.keys(profile).length > 0, {
+  message: "At least one profile field is required",
+});
+
+const reservationIdSchema = roomIdSchema;
+
+const reservationUpdateSchema = z.object({
+  guestName: reservationFields.guestName.optional(),
+  guestEmail: reservationFields.guestEmail.optional(),
+  guestPhone: reservationFields.guestPhone.optional(),
+  guestCountry: z.string().trim().regex(/^[A-Za-z]{2}$/).optional(),
+  checkIn: reservationFields.checkIn.optional(),
+  checkOut: reservationFields.checkOut.optional(),
+  roomTypeId: roomIdSchema.optional(),
+  assignedRoomId: roomIdSchema.optional(),
+  adults: reservationFields.adults.optional(),
+  children: reservationFields.children.optional(),
+  status: z.enum(["confirmed", "cancelled", "checked_in", "checked_out", "no_show"]).optional(),
+}).refine((reservation) => Object.keys(reservation).length > 0, {
+  message: "At least one field is required",
+}).refine(
+  (reservation) => (reservation.checkIn === undefined) === (reservation.checkOut === undefined),
+  { message: "checkIn and checkOut must be provided together", path: ["checkOut"] },
+).refine(
+  (reservation) => reservation.checkIn === undefined || validStayDates(reservation),
+  { message: "Check-out must be after check-in", path: ["checkOut"] },
+);
+
 module.exports = {
+  adminReservationSchema,
   actionTokenSchema,
   bedSetupItemSchema,
   emailOnlySchema,
+  guestListSchema,
+  guestProfileUpdateSchema,
   hotelSchema,
   hotelStatusSchema,
   loginSchema,
   paginationSchema,
   planSchema,
   planSelectionSchema,
+  publicReservationSchema,
   registrationSchema,
+  reservationAvailabilitySchema,
+  reservationIdSchema,
+  reservationListSchema,
+  reservationLookupSchema,
+  reservationPaymentSchema,
+  reservationUpdateSchema,
   resetPasswordSchema,
   roomIdSchema,
   roomSchema,

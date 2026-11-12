@@ -1,8 +1,10 @@
 const express = require("express");
 const { rateLimit } = require("express-rate-limit");
 const authController = require("./controllers/auth-controller");
+const guestController = require("./controllers/guest-controller");
 const hotelController = require("./controllers/hotel-controller");
 const platformController = require("./controllers/platform-controller");
+const reservationController = require("./controllers/reservation-controller");
 const roomController = require("./controllers/room-controller");
 const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
@@ -37,6 +39,18 @@ const refreshLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
+const publicReservationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+const reservationLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -45,6 +59,16 @@ router.get("/", (_req, res) => {
   res.json({ message: "Hotel backend is running" });
 });
 router.get("/api/public/plans", hotelController.publicPlans);
+router.post(
+  "/api/public/reservations",
+  publicReservationLimiter,
+  reservationController.createPublicReservation,
+);
+router.post(
+  "/api/public/reservations/lookup",
+  reservationLookupLimiter,
+  reservationController.lookupPublicReservation,
+);
 
 router.post("/api/auth/register", registrationLimiter, authController.register);
 router.post("/api/auth/login", loginLimiter, authController.login);
@@ -138,6 +162,54 @@ router.delete(
   authenticate,
   requireManager,
   roomController.deactivateRoom,
+);
+router.get(
+  "/api/hotels/:hotelId/guests",
+  authenticate,
+  requireManager,
+  guestController.listGuests,
+);
+router.patch(
+  "/api/hotels/:hotelId/guests/:guestId",
+  authenticate,
+  requireManager,
+  guestController.updateGuestProfile,
+);
+router.get(
+  "/api/hotels/:hotelId/reservations/availability",
+  authenticate,
+  requireManager,
+  reservationController.getAvailability,
+);
+router.get(
+  "/api/hotels/:hotelId/reservations/:reservationId/payments",
+  authenticate,
+  requireManager,
+  reservationController.listPayments,
+);
+router.post(
+  "/api/hotels/:hotelId/reservations/:reservationId/payments",
+  authenticate,
+  requireManager,
+  reservationController.recordPayment,
+);
+router.get(
+  "/api/hotels/:hotelId/reservations",
+  authenticate,
+  requireManager,
+  reservationController.listReservations,
+);
+router.post(
+  "/api/hotels/:hotelId/reservations",
+  authenticate,
+  requireManager,
+  reservationController.createAdminReservation,
+);
+router.patch(
+  "/api/hotels/:hotelId/reservations/:reservationId",
+  authenticate,
+  requireManager,
+  reservationController.updateReservation,
 );
 
 router.get(
