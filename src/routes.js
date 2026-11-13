@@ -6,6 +6,7 @@ const hotelController = require("./controllers/hotel-controller");
 const platformController = require("./controllers/platform-controller");
 const reservationController = require("./controllers/reservation-controller");
 const roomController = require("./controllers/room-controller");
+const staffController = require("./controllers/staff-controller");
 const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
   authenticate,
@@ -174,6 +175,36 @@ router.patch(
   authenticate,
   requireManager,
   guestController.updateGuestProfile,
+);
+router.get(
+  "/api/hotels/:hotelId/departments",
+  authenticate,
+  requireManager,
+  staffController.listDepartments,
+);
+router.post(
+  "/api/hotels/:hotelId/departments",
+  authenticate,
+  requireManager,
+  staffController.createDepartment,
+);
+router.get(
+  "/api/hotels/:hotelId/staff",
+  authenticate,
+  requireManager,
+  staffController.listStaff,
+);
+router.post(
+  "/api/hotels/:hotelId/staff",
+  authenticate,
+  requireManager,
+  staffController.createStaffMember,
+);
+router.patch(
+  "/api/hotels/:hotelId/staff/:staffId",
+  authenticate,
+  requireManager,
+  staffController.updateStaffMember,
 );
 router.get(
   "/api/hotels/:hotelId/reservations/availability",

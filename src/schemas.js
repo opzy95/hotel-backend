@@ -161,6 +161,29 @@ const roomUpdateSchema = roomSchema.partial().refine(
   { message: "At least one field is required" },
 );
 
+const departmentSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  shortName: z.string().trim().min(1).max(40),
+  description: z.string().trim().max(1000).optional().default(""),
+  lead: z.string().trim().max(120).optional().default(""),
+});
+
+const staffMemberFields = {
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254),
+  phone: z.string().trim().min(3).max(40),
+  role: z.string().trim().min(1).max(80),
+  departmentId: roomIdSchema,
+  shift: z.string().trim().min(1).max(80),
+  status: z.enum(["on_duty", "off_duty", "on_leave"]),
+};
+
+const staffMemberSchema = z.object(staffMemberFields);
+const staffMemberUpdateSchema = staffMemberSchema.partial().refine(
+  (staffMember) => Object.keys(staffMember).length > 0,
+  { message: "At least one field is required" },
+);
+
 const reservationFields = {
   guestName: z.string().trim().min(2).max(120),
   guestEmail: z.string().trim().email().max(254),
@@ -278,6 +301,7 @@ module.exports = {
   adminReservationSchema,
   actionTokenSchema,
   bedSetupItemSchema,
+  departmentSchema,
   emailOnlySchema,
   guestListSchema,
   guestProfileUpdateSchema,
@@ -303,5 +327,7 @@ module.exports = {
   roomTypeUpdateSchema,
   roomUpdateSchema,
   settingsSchema,
+  staffMemberSchema,
+  staffMemberUpdateSchema,
   verificationCodeSchema,
 };

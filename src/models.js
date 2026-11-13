@@ -138,6 +138,34 @@ const guestSchema = new Schema({
 guestSchema.index({ hotelId: 1, email: 1 }, { unique: true });
 guestSchema.index({ hotelId: 1, createdAt: -1 });
 
+const departmentSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
+  name: { type: String, required: true, trim: true, maxlength: 120 },
+  shortName: { type: String, required: true, trim: true, maxlength: 40 },
+  shortNameKey: { type: String, required: true },
+  description: { type: String, trim: true, maxlength: 1000, default: "" },
+  lead: { type: String, trim: true, maxlength: 120, default: "" },
+}, { timestamps: true });
+departmentSchema.index({ hotelId: 1, shortNameKey: 1 }, { unique: true });
+
+const staffMemberSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
+  name: { type: String, required: true, trim: true, maxlength: 120 },
+  email: { type: String, required: true, lowercase: true, trim: true, maxlength: 254 },
+  phone: { type: String, required: true, trim: true, maxlength: 40 },
+  role: { type: String, required: true, trim: true, maxlength: 80 },
+  departmentId: { type: Schema.Types.ObjectId, ref: "Department", required: true },
+  shift: { type: String, required: true, trim: true, maxlength: 80 },
+  status: {
+    type: String,
+    enum: ["on_duty", "off_duty", "on_leave"],
+    required: true,
+  },
+  joinedAt: { type: Date, required: true, default: Date.now },
+}, { timestamps: true });
+staffMemberSchema.index({ hotelId: 1, email: 1 }, { unique: true });
+staffMemberSchema.index({ hotelId: 1, departmentId: 1 });
+
 const reservationSchema = new Schema({
   hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
   guestId: { type: Schema.Types.ObjectId, ref: "Guest", default: null },
@@ -280,6 +308,7 @@ auditLogSchema.index({ hotelId: 1, createdAt: -1 });
 module.exports = {
   AuditLog: mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema),
   AuthActionToken: mongoose.models.AuthActionToken || mongoose.model("AuthActionToken", authActionTokenSchema),
+  Department: mongoose.models.Department || mongoose.model("Department", departmentSchema),
   Guest: mongoose.models.Guest || mongoose.model("Guest", guestSchema),
   Hotel: mongoose.models.Hotel || mongoose.model("Hotel", hotelSchema),
   HotelMembership: mongoose.models.HotelMembership || mongoose.model("HotelMembership", membershipSchema),
@@ -294,5 +323,6 @@ module.exports = {
   RoomType: mongoose.models.RoomType || mongoose.model("RoomType", roomTypeSchema),
   Subscription: mongoose.models.Subscription || mongoose.model("Subscription", subscriptionSchema),
   SubscriptionPayment: mongoose.models.SubscriptionPayment || mongoose.model("SubscriptionPayment", subscriptionPaymentSchema),
+  StaffMember: mongoose.models.StaffMember || mongoose.model("StaffMember", staffMemberSchema),
   User: mongoose.models.User || mongoose.model("User", userSchema),
 };

@@ -82,6 +82,11 @@ expiry, issuer, and audience checks.
 | `DELETE` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Deactivate a room |
 | `GET` | `/api/hotels/{hotelId}/guests` | Hotel Manager | List hotel-scoped guest profiles with pagination and optional search/tier filters |
 | `PATCH` | `/api/hotels/{hotelId}/guests/{guestId}` | Hotel Manager | Update a guest's country or membership tier |
+| `GET` | `/api/hotels/{hotelId}/departments` | Hotel Manager | List the hotel's departments |
+| `POST` | `/api/hotels/{hotelId}/departments` | Hotel Manager | Create a department |
+| `GET` | `/api/hotels/{hotelId}/staff` | Hotel Manager | List the hotel's staff |
+| `POST` | `/api/hotels/{hotelId}/staff` | Hotel Manager | Add staff to a department belonging to the hotel |
+| `PATCH` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Update staff details; updates may be partial |
 | `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug |
 | `POST` | `/api/public/reservations/lookup` | Public, rate-limited | Retrieve a reservation with its reference and guest email |
 | `GET` | `/api/hotels/{hotelId}/reservations` | Hotel Manager | List reservations with pagination and optional search/status/check-in-date filters |
@@ -119,6 +124,25 @@ reset revokes all refresh sessions for the user. Refresh cookies are scoped to
 `/api/auth`, `HttpOnly`, and `SameSite=Lax` by default. For a cross-site frontend
 and API, configure `COOKIE_SAME_SITE=none` and serve over HTTPS; `Secure` is
 enabled automatically in production or can be set with `COOKIE_SECURE=true`.
+
+### Staff and departments
+
+Create departments with `name`, `shortName`, and optional `description` and
+`lead`. Department short names are unique within each hotel, ignoring case.
+Department create returns `{ "department": { "id", "name", "shortName",
+"description", "lead" } }`; the list endpoint returns a `departments` array
+with the same fields.
+
+Staff create requires `name`, `email`, `phone`, `role`, `departmentId`, `shift`,
+and `status`. The status must be `on_duty`, `off_duty`, or `on_leave`. A staff
+member's email is unique within their hotel. The department must already exist
+in that same hotel; this is also checked when changing a staff member's
+department. Staff create returns `{ "staffMember": { "id", "name", "email",
+"phone", "role", "departmentId", "shift", "status", "joinedAt" } }`; the list
+endpoint returns a `staff` array with the same fields. `joinedAt` is set by the
+API. Invalid request fields return `400` with `validation_error` and field
+details; duplicate department short names or staff emails return `409`, while
+department ownership and missing-resource errors return `404`.
 
 ### Room inventory
 
