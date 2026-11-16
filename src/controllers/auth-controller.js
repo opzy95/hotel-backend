@@ -1,5 +1,7 @@
 const authService = require("../services/auth-service");
+const hotelInvitationService = require("../services/hotel-invitation-service");
 const {
+  acceptHotelInvitationSchema,
   emailOnlySchema,
   loginSchema,
   registrationSchema,
@@ -182,7 +184,25 @@ async function currentUser(req, res) {
   return res.json(await authService.getCurrentUser(req.user));
 }
 
+async function acceptInvitation(req, res) {
+  const parsed = acceptHotelInvitationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "validation_error",
+      details: validationDetails(parsed.error.issues),
+    });
+  }
+  const result = await hotelInvitationService.acceptInvitation(parsed.data);
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+  return res.json({
+    message: "Invitation accepted. You can now sign in.",
+  });
+}
+
 module.exports = {
+  acceptInvitation,
   currentUser,
   forgotPassword,
   login,

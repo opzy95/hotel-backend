@@ -1,4 +1,10 @@
-const { Department, StaffMember } = require("../models");
+const {
+  Department,
+  HotelInvitation,
+  HotelMembership,
+  StaffMember,
+  User,
+} = require("../models");
 
 function departmentResource(department) {
   return {
@@ -98,9 +104,75 @@ async function updateStaffMember(hotelId, staffId, data) {
   }
 }
 
+async function deleteStaffMember(hotelId, staffId) {
+  const session = await StaffMember.startSession();
+  let result;
+  try {
+    await session.withTransaction(async () => {
+      const staffMember = await StaffMember.findOne({
+        _id: staffId,
+        hotelId,
+      }).session(session).lean();
+      if (!staffMember) {
+        result = { error: "staff_member_not_found" };
+        return;
+      }
+
+      const deleted = await StaffMember.deleteOne(
+        { _id: staffMember._id, hotelId },
+        { session },
+      );
+      if (deleted.deletedCount !== 1) {
+        result = { error: "staff_member_not_found" };
+        return;
+      }
+
+      const email = staffMember.email.toLowerCase();
+      const user = await User.findOne({ email }).select("_id").session(session);
+      const revokedInvitations = await HotelInvitation.updateMany(
+        {
+          hotelId,
+          revokedAt: null,
+          consumedAt: null,
+          $or: [
+            { staffMemberId: staffMember._id },
+            { email },
+          ],
+        },
+        { $set: { revokedAt: new Date() } },
+        { session },
+      );
+
+      const membershipFilter = {
+        hotelId,
+        role: "receptionist",
+        status: "active",
+        $or: [{ staffMemberId: staffMember._id }],
+      };
+      if (user) {
+        membershipFilter.$or.push({ userId: user._id });
+      }
+      const revokedMemberships = await HotelMembership.updateMany(
+        membershipFilter,
+        { $set: { status: "revoked" } },
+        { session },
+      );
+      result = {
+        staffMemberId: staffMember._id,
+        accessRevoked: revokedMemberships.modifiedCount > 0,
+        invitationsRevoked: revokedInvitations.modifiedCount,
+      };
+    });
+  } finally {
+    await session.endSession();
+  }
+  return result;
+}
+
 module.exports = {
   createDepartment,
   createStaffMember,
+  deleteStaffMember,
   departmentResource,
   listDepartments,
   listStaff,

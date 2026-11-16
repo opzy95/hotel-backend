@@ -164,3 +164,21 @@ test("admin guest profile routes require authentication", async () => {
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "authentication_required");
 });
+
+test("inviting an existing staff member requires authentication", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/staff/not-an-id/invitation`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});
+
+test("deleting a staff member requires authentication", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/staff/not-an-id`,
+    { method: "DELETE" },
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});

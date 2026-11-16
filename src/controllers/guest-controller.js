@@ -1,5 +1,10 @@
 const guestService = require("../services/guest-service");
-const { guestListSchema, guestProfileUpdateSchema, roomIdSchema } = require("../schemas");
+const {
+  guestCreateSchema,
+  guestListSchema,
+  guestProfileUpdateSchema,
+  roomIdSchema,
+} = require("../schemas");
 
 function validationDetails(issues) {
   return issues.map(({ path, message }) => ({
@@ -41,7 +46,23 @@ async function updateGuestProfile(req, res) {
   return res.json(result);
 }
 
+async function createGuest(req, res) {
+  const parsed = guestCreateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "validation_error",
+      details: validationDetails(parsed.error.issues),
+    });
+  }
+  const result = await guestService.createGuest(req.params.hotelId, parsed.data);
+  if (result.error) {
+    return res.status(409).json({ error: result.error });
+  }
+  return res.status(201).json(result);
+}
+
 module.exports = {
+  createGuest,
   listGuests,
   updateGuestProfile,
 };

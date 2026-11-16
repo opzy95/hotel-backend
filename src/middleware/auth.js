@@ -57,6 +57,50 @@ async function requireManager(req, res, next) {
   return next();
 }
 
+function requireHotelPermission(permission) {
+  return async function hotelPermissionMiddleware(req, res, next) {
+    if (!mongoose.isValidObjectId(req.params.hotelId)) {
+      return res.status(404).json({ error: "hotel_not_found" });
+    }
+
+    const membership = await HotelMembership.findOne({
+      hotelId: req.params.hotelId,
+      userId: req.user._id,
+      status: "active",
+    });
+    if (!membership) {
+      return res.status(404).json({ error: "hotel_not_found" });
+    }
+    const hotel = await Hotel.findById(req.params.hotelId).select("status");
+    if (!hotel) {
+      return res.status(404).json({ error: "hotel_not_found" });
+    }
+    if (hotel.status === "suspended") {
+      return res.status(403).json({ error: "hotel_suspended" });
+    }
+    await expireSubscriptions(hotel._id);
+    const permissions = membership.permissions || [];
+    const hasPaymentPermission = permissions.includes("payments.create")
+      || permissions.includes("payments.walk_in.create");
+    const hasPermission = permissions.includes(permission)
+      || (
+        ["payments.create", "payments.walk_in.create"].includes(permission)
+        && hasPaymentPermission
+      );
+    if (
+      membership.role !== "manager"
+      && (
+        membership.role !== "receptionist"
+        || !hasPermission
+      )
+    ) {
+      return res.status(403).json({ error: "hotel_permission_required" });
+    }
+    req.hotelMembership = membership;
+    return next();
+  };
+}
+
 async function requireSubscriptionWriteAccess(req, res, next) {
   const subscription = await Subscription.findOne({
     hotelId: req.params.hotelId,
@@ -84,6 +128,7 @@ async function requirePlatformOperator(req, res, next) {
 module.exports = {
   authenticate,
   requireManager,
+  requireHotelPermission,
   requirePlatformOperator,
   requireSubscriptionWriteAccess,
 };

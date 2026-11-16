@@ -38,7 +38,8 @@ async function listRoomTypes(req, res) {
   }
   const roomTypes = await roomService.listRoomTypes(
     req.params.hotelId,
-    parsed.data.includeInactive === "true",
+    req.hotelMembership.role === "manager"
+      && parsed.data.includeInactive === "true",
   );
   return res.json({ roomTypes });
 }
@@ -136,7 +137,9 @@ async function listRooms(req, res) {
   }
   const rooms = await roomService.listRooms(
     req.params.hotelId,
-    parsed.data.includeInactive === "true",
+    req.hotelMembership.role === "manager"
+      && parsed.data.includeInactive === "true",
+    { availabilityOnly: req.hotelMembership.role === "receptionist" },
   );
   return res.json({ rooms });
 }

@@ -40,6 +40,7 @@ function paymentResource(payment, receivedBy) {
   const user = receivedBy || payment.receivedByUserId;
   return {
     id: payment._id,
+    reservationId: payment.reservationId,
     amountMinor: payment.amountMinor,
     currency: payment.currency,
     method: payment.method,
@@ -217,7 +218,6 @@ async function recordPayment(hotelId, reservationId, data, user) {
         result = { error: "reservation_not_found" };
         return;
       }
-
       const priorPayment = await ReservationPayment.findOne({
         hotelId,
         reservationId,
@@ -418,7 +418,7 @@ async function createReservation(hotelId, data, source) {
           guestId: guest,
           roomTypeId: roomType,
           roomId: available.room,
-        }, source === "admin"
+        }, source === "admin" || source === "walk_in"
           ? { includePaymentSummary: true, includeGuestProfile: true }
           : {}),
       };

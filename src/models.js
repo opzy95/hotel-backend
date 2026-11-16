@@ -28,6 +28,23 @@ const authActionTokenSchema = new Schema({
 authActionTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 authActionTokenSchema.index({ userId: 1, purpose: 1, consumedAt: 1 });
 
+const hotelInvitationSchema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
+  staffMemberId: { type: Schema.Types.ObjectId, ref: "StaffMember", default: null },
+  email: { type: String, required: true, lowercase: true, trim: true, maxlength: 254 },
+  role: { type: String, enum: ["receptionist"], required: true },
+  permissions: { type: [String], default: [] },
+  tokenHash: { type: String, required: true, unique: true, select: false },
+  expiresAt: { type: Date, required: true },
+  revokedAt: { type: Date, default: null },
+  consumedAt: { type: Date, default: null },
+  invitedByUserId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+}, { timestamps: true });
+hotelInvitationSchema.index(
+  { hotelId: 1, email: 1 },
+  { unique: true, partialFilterExpression: { revokedAt: null, consumedAt: null } },
+);
+
 const refreshSessionSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   sessionId: { type: Schema.Types.ObjectId, required: true, index: true },
@@ -75,7 +92,9 @@ const hotelSchema = new Schema({
 const membershipSchema = new Schema({
   hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-  role: { type: String, enum: ["manager", "staff"], required: true },
+  staffMemberId: { type: Schema.Types.ObjectId, ref: "StaffMember", default: null },
+  role: { type: String, enum: ["manager", "staff", "receptionist"], required: true },
+  permissions: { type: [String], default: [] },
   status: { type: String, enum: ["active", "revoked"], default: "active" },
 }, { timestamps: true });
 membershipSchema.index({ hotelId: 1, userId: 1 }, { unique: true });
@@ -196,7 +215,7 @@ const reservationSchema = new Schema({
     default: "confirmed",
     required: true,
   },
-  source: { type: String, enum: ["public", "admin"], required: true },
+  source: { type: String, enum: ["public", "admin", "walk_in"], required: true },
 }, { timestamps: true });
 reservationSchema.index({ hotelId: 1, createdAt: -1 });
 reservationSchema.index({ guestId: 1 });
@@ -311,6 +330,8 @@ module.exports = {
   Department: mongoose.models.Department || mongoose.model("Department", departmentSchema),
   Guest: mongoose.models.Guest || mongoose.model("Guest", guestSchema),
   Hotel: mongoose.models.Hotel || mongoose.model("Hotel", hotelSchema),
+  HotelInvitation: mongoose.models.HotelInvitation
+    || mongoose.model("HotelInvitation", hotelInvitationSchema),
   HotelMembership: mongoose.models.HotelMembership || mongoose.model("HotelMembership", membershipSchema),
   PlatformOperator: mongoose.models.PlatformOperator || mongoose.model("PlatformOperator", operatorSchema),
   Plan: mongoose.models.Plan || mongoose.model("Plan", planSchema),

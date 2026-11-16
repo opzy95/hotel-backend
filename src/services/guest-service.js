@@ -138,8 +138,27 @@ async function updateGuestProfile(hotelId, guestId, data) {
     : { error: "guest_not_found" };
 }
 
+async function createGuest(hotelId, data) {
+  try {
+    const guest = await Guest.create({
+      hotelId,
+      name: data.name,
+      email: data.email.toLowerCase(),
+      phone: data.phone,
+      country: data.country?.toUpperCase() || null,
+    });
+    return { guest: guestResource(guest) };
+  } catch (error) {
+    if (error.code === 11000) {
+      return { error: "guest_email_already_exists" };
+    }
+    throw error;
+  }
+}
+
 module.exports = {
   backfillLegacyReservationGuests,
+  createGuest,
   guestResource,
   listGuests,
   updateGuestProfile,

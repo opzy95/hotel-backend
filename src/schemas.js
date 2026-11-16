@@ -1,4 +1,8 @@
 const { z } = require("zod");
+const {
+  DEFAULT_RECEPTIONIST_PERMISSIONS,
+  RECEPTIONIST_PERMISSIONS,
+} = require("./utils/hotel-permissions");
 
 const hotelSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -37,6 +41,30 @@ const verificationCodeSchema = z.object({
 
 const actionTokenSchema = z.object({
   token: z.string().regex(/^[a-f\d]{64}$/i),
+});
+
+const receptionistPermissionsSchema = z.array(z.enum(RECEPTIONIST_PERMISSIONS))
+  .max(RECEPTIONIST_PERMISSIONS.length)
+  .refine((permissions) => new Set(permissions).size === permissions.length, {
+    message: "Permissions must not contain duplicates",
+  })
+  .optional().default(DEFAULT_RECEPTIONIST_PERMISSIONS);
+
+const hotelInvitationSchema = z.object({
+  email: z.string().trim().email().max(254),
+  permissions: receptionistPermissionsSchema,
+});
+
+const staffMemberInvitationSchema = z.object({
+  permissions: receptionistPermissionsSchema,
+});
+
+const acceptHotelInvitationSchema = actionTokenSchema.extend({
+  hotelId: z.string().regex(/^[a-f\d]{24}$/i),
+  email: z.string().trim().email().max(254),
+  name: z.string().trim().min(2).max(120),
+  password: z.string().min(12).max(128)
+    .refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password is too long"),
 });
 
 const resetPasswordSchema = actionTokenSchema.extend({
@@ -273,6 +301,13 @@ const guestProfileUpdateSchema = z.object({
   message: "At least one profile field is required",
 });
 
+const guestCreateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254),
+  phone: z.string().trim().min(3).max(40),
+  country: z.string().trim().regex(/^[A-Za-z]{2}$/).optional(),
+});
+
 const reservationIdSchema = roomIdSchema;
 
 const reservationUpdateSchema = z.object({
@@ -300,12 +335,15 @@ const reservationUpdateSchema = z.object({
 module.exports = {
   adminReservationSchema,
   actionTokenSchema,
+  acceptHotelInvitationSchema,
   bedSetupItemSchema,
   departmentSchema,
   emailOnlySchema,
+  guestCreateSchema,
   guestListSchema,
   guestProfileUpdateSchema,
   hotelSchema,
+  hotelInvitationSchema,
   hotelStatusSchema,
   loginSchema,
   paginationSchema,
@@ -326,6 +364,7 @@ module.exports = {
   roomTypeSchema,
   roomTypeUpdateSchema,
   roomUpdateSchema,
+  staffMemberInvitationSchema,
   settingsSchema,
   staffMemberSchema,
   staffMemberUpdateSchema,

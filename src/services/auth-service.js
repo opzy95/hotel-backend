@@ -390,13 +390,23 @@ async function getCurrentUser(user) {
   return {
     user: publicUser(user),
     isPlatformOperator: Boolean(operator),
-    memberships: memberships.map((membership) => ({
-      hotelId: membership.hotelId._id,
-      hotelName: membership.hotelId.name,
-      hotelStatus: membership.hotelId.status,
-      hotelSlug: membership.hotelId.slug,
-      role: membership.role,
-    })),
+    memberships: memberships.map((membership) => {
+      const permissions = membership.permissions || [];
+      const hasPaymentPermission = permissions.includes("payments.create")
+        || permissions.includes("payments.walk_in.create");
+      const normalizedPermissions = membership.role === "receptionist"
+        && hasPaymentPermission
+        ? [...new Set([...permissions, "payments.create", "payments.walk_in.create"])]
+        : permissions;
+      return {
+        hotelId: membership.hotelId._id,
+        hotelName: membership.hotelId.name,
+        hotelStatus: membership.hotelId.status,
+        hotelSlug: membership.hotelId.slug,
+        role: membership.role,
+        permissions: normalizedPermissions,
+      };
+    }),
   };
 }
 

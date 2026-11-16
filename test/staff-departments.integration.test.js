@@ -3,6 +3,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
   departmentSchema,
+  hotelInvitationSchema,
+  staffMemberInvitationSchema,
   staffMemberSchema,
   staffMemberUpdateSchema,
 } = require("../src/schemas");
@@ -31,6 +33,26 @@ test("staff and department schemas enforce the API contract", () => {
   assert.equal(staffMemberSchema.safeParse({ ...staffMember, status: "away" }).success, false);
   assert.equal(staffMemberUpdateSchema.safeParse({ status: "on_leave" }).success, true);
   assert.equal(staffMemberUpdateSchema.safeParse({}).success, false);
+
+  const defaultInvitation = hotelInvitationSchema.parse({ email: "r@example.test" });
+  assert.ok(defaultInvitation.permissions.includes("payments.walk_in.create"));
+  assert.equal(hotelInvitationSchema.safeParse({
+    email: "legacy@example.test",
+    permissions: ["payments.walk_in.create"],
+  }).success, true);
+  assert.deepEqual(hotelInvitationSchema.parse({
+    email: "r@example.test",
+    permissions: ["guests.view"],
+  }).permissions, ["guests.view"]);
+  assert.equal(hotelInvitationSchema.safeParse({
+    email: "r@example.test",
+    permissions: ["settings.update"],
+  }).success, false);
+  assert.equal(hotelInvitationSchema.safeParse({
+    email: "r@example.test",
+    permissions: ["guests.view", "guests.view"],
+  }).success, false);
+  assert.ok(staffMemberInvitationSchema.parse({}).permissions.includes("guests.create"));
 });
 
 test("hotel managers can manage staff and departments only within their hotel", {
@@ -208,6 +230,15 @@ test("hotel managers can manage staff and departments only within their hotel", 
 
     const otherHotelResponse = await request(`/api/hotels/${otherHotel._id}/departments`);
     assert.equal(otherHotelResponse.status, 404);
+
+    const deleteStaffResponse = await request(
+      `${hotelPath}/staff/${staffMember.id}`,
+      "DELETE",
+    );
+    assert.equal(deleteStaffResponse.status, 200);
+    assert.equal((await deleteStaffResponse.json()).message, "staff_member_deleted");
+    const staffAfterDeleteResponse = await request(`${hotelPath}/staff`);
+    assert.deepEqual((await staffAfterDeleteResponse.json()).staff, []);
   } finally {
     await StaffMember.deleteMany({ _id: { $in: createdStaffIds } });
     await Department.deleteMany({ _id: { $in: createdDepartmentIds } });

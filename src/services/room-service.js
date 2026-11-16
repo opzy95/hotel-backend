@@ -113,14 +113,20 @@ async function deactivateRoomType(hotelId, roomTypeId) {
     : { error: "room_type_not_found" };
 }
 
-async function listRooms(hotelId, includeInactive = false) {
+async function listRooms(hotelId, includeInactive = false, options = {}) {
   const filter = { hotelId };
   if (!includeInactive) {
     filter.active = true;
   }
+  let roomQuery = Room.find(filter);
+  if (options.availabilityOnly) {
+    roomQuery = roomQuery.select("_id hotelId code roomTypeId");
+  }
   const [rooms, hotel] = await Promise.all([
-    Room.find(filter)
-      .populate("roomTypeId")
+    roomQuery
+      .populate(options.availabilityOnly
+        ? { path: "roomTypeId", select: "name", match: { active: true } }
+        : "roomTypeId")
       .sort({ codeKey: 1 })
       .lean(),
     Hotel.findById(hotelId).select("settings.timezone").lean(),
@@ -153,10 +159,25 @@ async function listRooms(hotelId, includeInactive = false) {
       statusByRoomId.set(reservation.roomId.toString(), status);
     }
   }
-  return rooms.map((room) => roomResource(
-    room,
-    statusByRoomId.get(room._id.toString()) || "Available",
-  ));
+  const visibleRooms = options.availabilityOnly
+    ? rooms.filter((room) => room.roomTypeId)
+    : rooms;
+  return visibleRooms.map((room) => {
+    const status = statusByRoomId.get(room._id.toString()) || "Available";
+    if (options.availabilityOnly) {
+      return {
+        id: room._id,
+        hotelId: room.hotelId,
+        code: room.code,
+        roomType: {
+          id: room.roomTypeId._id,
+          name: room.roomTypeId.name,
+        },
+        status,
+      };
+    }
+    return roomResource(room, status);
+  });
 }
 
 async function findActiveRoomType(hotelId, roomTypeId) {

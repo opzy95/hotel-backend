@@ -112,9 +112,23 @@ async function sendPasswordResetEmail(user, token) {
   });
 }
 
+async function sendStaffInvitationEmail(invitation, token) {
+  const frontend = getFrontendConfiguration();
+  const url = new URL(buildActionUrl("/accept-invitation", token, frontend));
+  url.searchParams.set("hotelId", invitation.hotelId.toString());
+  const email = escapeHtml(invitation.email);
+  await sendBrevoEmail({
+    to: { email: invitation.email, name: invitation.email },
+    subject: "You're invited to join a hotel team",
+    text: `You have been invited to join a hotel as a receptionist. Accept this invitation and set your password using this link (valid for 7 days): ${url}`,
+    html: `<p>You have been invited to join a hotel as a receptionist.</p><p><a href="${url}">Accept the invitation</a></p><p>This link was sent to ${email}, expires in 7 days, and can only be used once. If you did not expect this invitation, you can ignore this email.</p>`,
+  });
+}
+
 module.exports = {
   getEmailConfiguration,
   sendBrevoEmail,
   sendPasswordResetEmail,
+  sendStaffInvitationEmail,
   sendVerificationEmail,
 };

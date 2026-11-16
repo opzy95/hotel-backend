@@ -57,6 +57,7 @@ expiry, issuer, and audience checks.
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant, Manager membership, and pending subscription |
+| `POST` | `/api/auth/accept-invitation` | Public, rate-limited | Accept a single-use hotel staff invitation and set a password |
 | `POST` | `/api/auth/login` | Public, rate-limited | Sign in; configured frontend origin also receives an HttpOnly refresh cookie |
 | `POST` | `/api/auth/refresh` | Configured frontend origin | Rotate refresh cookie and issue a new access token |
 | `POST` | `/api/auth/logout` | Configured frontend origin | Revoke refresh session and clear its cookie |
@@ -70,30 +71,40 @@ expiry, issuer, and audience checks.
 | `GET` | `/api/hotels/{hotelId}/onboarding` | Hotel Manager | Read hotel status, plan, and setup progress |
 | `PUT` | `/api/hotels/{hotelId}/subscription` | Hotel Manager | Select an active plan |
 | `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update initial hotel settings |
-| `GET` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | List active room types; `includeInactive=true` includes inactive types |
+| `GET` | `/api/hotels/{hotelId}/room-types` | Manager, or receptionist with `rooms.availability.view` | List active room types; only managers can include inactive types |
 | `POST` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | Create a room type |
 | `PATCH` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Update room type details |
 | `DELETE` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Deactivate a room type |
 | `POST` | `/api/hotels/{hotelId}/room-types/{roomTypeId}/photos` | Hotel Manager | Upload up to 10 photos as multipart `photos` fields |
 | `DELETE` | `/api/hotels/{hotelId}/room-types/{roomTypeId}/photos/{photoId}` | Hotel Manager | Delete a room-type photo from Cloudinary |
-| `GET` | `/api/hotels/{hotelId}/rooms` | Hotel Manager | List active rooms and their room types; `includeInactive=true` includes inactive rooms |
+| `GET` | `/api/hotels/{hotelId}/rooms` | Manager, or receptionist with `rooms.availability.view` | List room status; receptionists see active rooms only and receive availability fields only |
 | `POST` | `/api/hotels/{hotelId}/rooms` | Hotel Manager | Create a room using an active room type in the same hotel |
 | `PATCH` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Update room code, type, floor, wing, or notes |
 | `DELETE` | `/api/hotels/{hotelId}/rooms/{roomId}` | Hotel Manager | Deactivate a room |
-| `GET` | `/api/hotels/{hotelId}/guests` | Hotel Manager | List hotel-scoped guest profiles with pagination and optional search/tier filters |
+| `GET` | `/api/hotels/{hotelId}/guests` | Manager or receptionist with `guests.view` | List hotel-scoped guest profiles with pagination and optional search/tier filters |
+| `POST` | `/api/hotels/{hotelId}/guests` | Manager or receptionist with `guests.create` | Add a hotel-scoped guest profile |
 | `PATCH` | `/api/hotels/{hotelId}/guests/{guestId}` | Hotel Manager | Update a guest's country or membership tier |
 | `GET` | `/api/hotels/{hotelId}/departments` | Hotel Manager | List the hotel's departments |
 | `POST` | `/api/hotels/{hotelId}/departments` | Hotel Manager | Create a department |
 | `GET` | `/api/hotels/{hotelId}/staff` | Hotel Manager | List the hotel's staff |
+| `GET` | `/api/hotels/{hotelId}/staff/invitations` | Hotel Manager | List staff invitations and their pending, accepted, expired, or revoked status |
+| `POST` | `/api/hotels/{hotelId}/staff/invitations` | Hotel Manager | Invite an email as a receptionist with selected operational permissions |
+| `POST` | `/api/hotels/{hotelId}/staff/{staffId}/invitation` | Hotel Manager | Send a receptionist invitation to an existing receptionist staff record |
+| `POST` | `/api/hotels/{hotelId}/staff/invitations/{invitationId}/resend` | Hotel Manager | Invalidate and resend a receptionist invitation |
+| `DELETE` | `/api/hotels/{hotelId}/staff/invitations/{invitationId}` | Hotel Manager | Revoke a pending receptionist invitation |
 | `POST` | `/api/hotels/{hotelId}/staff` | Hotel Manager | Add staff to a department belonging to the hotel |
 | `PATCH` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Update staff details; updates may be partial |
+| `DELETE` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Delete a staff record; also revoke associated receptionist access and pending invitations |
 | `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug |
 | `POST` | `/api/public/reservations/lookup` | Public, rate-limited | Retrieve a reservation with its reference and guest email |
-| `GET` | `/api/hotels/{hotelId}/reservations` | Hotel Manager | List reservations with pagination and optional search/status/check-in-date filters |
-| `POST` | `/api/hotels/{hotelId}/reservations` | Hotel Manager | Create an admin reservation and assign a physical room |
-| `GET` | `/api/hotels/{hotelId}/reservations/availability` | Hotel Manager | Check available rooms and server-calculated pricing for a stay and room type |
-| `GET` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Hotel Manager | List recorded payments and current payment summary |
-| `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Hotel Manager | Record a full or partial admin-collected payment |
+| `GET` | `/api/hotels/{hotelId}/reservations` | Manager or receptionist with `reservations.view` | List reservations with pagination and optional search/status/check-in-date filters |
+| `POST` | `/api/hotels/{hotelId}/reservations` | Manager or receptionist with `reservations.create` | Create an admin reservation and assign a physical room |
+| `POST` | `/api/hotels/{hotelId}/reservations/walk-ins` | Manager or receptionist with `reservations.create` | Create a walk-in reservation eligible for receptionist payment recording |
+| `GET` | `/api/hotels/{hotelId}/reservations/availability` | Manager or receptionist with `rooms.availability.view` | Check available rooms and server-calculated pricing for a stay and room type |
+| `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/check-in` | Manager or receptionist with `reservations.check_in` | Check in a reservation |
+| `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/check-out` | Manager or receptionist with `reservations.check_out` | Check out a reservation |
+| `GET` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Manager, or receptionist with `payments.walk_in.create` | List payments and current summary for a reservation |
+| `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Manager, or receptionist with `payments.walk_in.create` | Record a full or partial payment for any reservation, including walk-ins |
 | `PATCH` | `/api/hotels/{hotelId}/reservations/{reservationId}` | Hotel Manager | Update guest, stay, room assignment, or reservation status |
 | `GET` | `/api/platform/hotels` | Platform operator | List hotels with manager, subscription, plan, and subscription payment details |
 | `GET` | `/api/platform/hotels/pending-approval` | Platform operator | List hotels whose registering Manager has not verified email |
@@ -144,6 +155,53 @@ API. Invalid request fields return `400` with `validation_error` and field
 details; duplicate department short names or staff emails return `409`, while
 department ownership and missing-resource errors return `404`.
 
+To invite a person already listed as a receptionist, the frontend can select
+their staff record and call
+`POST /api/hotels/{hotelId}/staff/{staffId}/invitation` with an optional
+`{ "permissions": [...] }` body. The backend verifies that the record belongs
+to that hotel and its role is `Receptionist`, then emails the invitation to the
+record's address. The record remains visible in the staff list after the
+receptionist accepts; the invitation response includes its `staffMemberId`.
+The email-based invitation endpoint also links a matching receptionist staff
+record when one exists. Fresh email invitations remain available for people
+who are not yet in the staff directory.
+
+Managers can remove any staff directory entry with
+`DELETE /api/hotels/{hotelId}/staff/{staffId}`. Deleting a receptionist also
+revokes their active receptionist membership for this hotel and any pending
+invitation tied to the staff entry or email. The person's global user account
+is retained, but it no longer has access to this hotel. Other staff deletion
+only removes the hotel directory entry.
+
+### Receptionist invitations and access
+
+Managers invite a receptionist with `POST /api/hotels/{hotelId}/staff/invitations`
+and `{ "email": "...", "permissions": ["reservations.view", ...] }`. If
+`permissions` is omitted, the invitation grants the supported receptionist
+actions: `reservations.view`, `reservations.create`, `guests.view`,
+`guests.create`, `reservations.check_in`, `reservations.check_out`,
+`rooms.availability.view`, and `payments.walk_in.create`. Managers can select
+a subset; manager-only permissions are not accepted. The email contains a
+single-use link that expires after seven days. Resending replaces the token;
+revoking invalidates it. The API stores only a token hash and never creates a
+password before acceptance.
+
+The recipient accepts the link with `POST /api/auth/accept-invitation`,
+providing the link's `token` and `hotelId` query values, the invited `email`,
+their `name`, and a new `password`. Successful acceptance verifies the email,
+activates the hotel membership, consumes the invitation, and enables normal
+`/api/auth/login`.
+`/api/auth/me` returns each active membership's `hotelId`, `role`, and
+`permissions`. Receptionist API access is checked against that active,
+hotel-scoped membership on every request. Staff management, hotel settings,
+reports, room configuration, reservation editing, and payment editing,
+deletion, refunds, and general administration remain manager-only.
+Receptionists with `payments.walk_in.create` may view the payment history and
+record append-only payments for reservations created through any source,
+including walk-ins. They
+cannot edit, delete, or refund payments. Memberships using the `payments.create`
+alias are also recognized for compatibility.
+
 ### Room inventory
 
 Room-type create/update bodies use `name`, optional `description`, `sizeSqm`,
@@ -157,9 +215,11 @@ minor units.
 Room create/update bodies use `code`, `roomTypeId`, and optional `floor`,
 `wing`, and `notes`. Codes are unique per hotel, ignoring case. Create and type
 change operations require an active room type belonging to the same hotel.
-Room types and rooms are deactivated rather than hard-deleted. All of these
-routes require an active manager membership; platform-operator status alone is
-not sufficient.
+Room types and rooms are deactivated rather than hard-deleted. Inventory
+changes require an active manager membership; platform-operator status alone
+is not sufficient. Receptionists with `rooms.availability.view` can read active
+room types and a limited room-status response, but cannot include inactive
+items or access room configuration fields.
 
 Example room-type request:
 
@@ -222,6 +282,11 @@ Reservation payment status is derived from recorded amounts: `unpaid`,
 `checked_in`, `checked_out`, and `no_show`. A cancelled or no-show reservation
 can be confirmed again only if the room remains available; checked-in
 reservations can only be checked out.
+The backend runs a checkout scheduler every minute. For hotels with a configured
+timezone and `checkOutTime`, checked-in reservations are persisted as
+`checked_out` once that local checkout time has passed on or after their
+checkout date. Hotels without valid checkout settings are skipped until
+configured; the scheduler reports them in the backend logs.
 
 Public booking request:
 
@@ -330,8 +395,9 @@ The array is empty when there is no available room. Requests exceeding the
 category's guest limit return `409 room_guest_limit_exceeded`. This is a
 point-in-time check: reservation creation checks inventory again, so the UI must
 handle `409 room_unavailable` if another booking wins the room before save.
-Availability, creation, and listing routes all require an active manager
-membership for the hotel.
+Availability is available to managers and receptionists with
+`rooms.availability.view`; reservation creation and listing use their
+respective hotel-scoped permissions.
 
 `PATCH /api/hotels/{hotelId}/reservations/{reservationId}` accepts partial guest
 details, both `checkIn` and `checkOut` together, `roomTypeId` with an optional
@@ -392,8 +458,9 @@ The payment response contains `payment` with `id`, `amountMinor`, `currency`,
 `{ "payments": [...], "paymentSummary": { ... } }`. Admin reservation objects
 also include `paymentSummary`. Payment records are append-only; payment
 reversals/refunds and gateway processing are not implemented. Manager
-reservation and payment operations require an active manager membership for
-that hotel; an arbitrary `hotelId` does not grant access.
+reservation and payment administration requires an active manager membership;
+receptionist access is limited to explicit permissions, and an arbitrary
+`hotelId` does not grant access.
 
 The local API base URL is `http://localhost:3000/api` unless `PORT` is
 configured. In deployment, use the backend origin with the `/api` prefix. For

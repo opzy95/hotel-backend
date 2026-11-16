@@ -11,6 +11,7 @@ const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
   authenticate,
   requireManager,
+  requireHotelPermission,
   requirePlatformOperator,
   requireSubscriptionWriteAccess,
 } = require("./middleware/auth");
@@ -31,6 +32,18 @@ const recoveryLimiter = rateLimit({
 const registrationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+const invitationAcceptanceLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+const staffInvitationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
@@ -72,6 +85,11 @@ router.post(
 );
 
 router.post("/api/auth/register", registrationLimiter, authController.register);
+router.post(
+  "/api/auth/accept-invitation",
+  invitationAcceptanceLimiter,
+  authController.acceptInvitation,
+);
 router.post("/api/auth/login", loginLimiter, authController.login);
 router.post("/api/auth/refresh", refreshLimiter, authController.refresh);
 router.post("/api/auth/logout", authController.logout);
@@ -106,7 +124,7 @@ router.patch(
 router.get(
   "/api/hotels/:hotelId/room-types",
   authenticate,
-  requireManager,
+  requireHotelPermission("rooms.availability.view"),
   roomController.listRoomTypes,
 );
 router.post(
@@ -143,7 +161,7 @@ router.delete(
 router.get(
   "/api/hotels/:hotelId/rooms",
   authenticate,
-  requireManager,
+  requireHotelPermission("rooms.availability.view"),
   roomController.listRooms,
 );
 router.post(
@@ -167,8 +185,14 @@ router.delete(
 router.get(
   "/api/hotels/:hotelId/guests",
   authenticate,
-  requireManager,
+  requireHotelPermission("guests.view"),
   guestController.listGuests,
+);
+router.post(
+  "/api/hotels/:hotelId/guests",
+  authenticate,
+  requireHotelPermission("guests.create"),
+  guestController.createGuest,
 );
 router.patch(
   "/api/hotels/:hotelId/guests/:guestId",
@@ -194,6 +218,39 @@ router.get(
   requireManager,
   staffController.listStaff,
 );
+router.get(
+  "/api/hotels/:hotelId/staff/invitations",
+  authenticate,
+  requireManager,
+  staffController.listInvitations,
+);
+router.post(
+  "/api/hotels/:hotelId/staff/invitations",
+  authenticate,
+  requireManager,
+  staffInvitationLimiter,
+  staffController.createInvitation,
+);
+router.post(
+  "/api/hotels/:hotelId/staff/:staffId/invitation",
+  authenticate,
+  requireManager,
+  staffInvitationLimiter,
+  staffController.createStaffMemberInvitation,
+);
+router.post(
+  "/api/hotels/:hotelId/staff/invitations/:invitationId/resend",
+  authenticate,
+  requireManager,
+  staffInvitationLimiter,
+  staffController.resendInvitation,
+);
+router.delete(
+  "/api/hotels/:hotelId/staff/invitations/:invitationId",
+  authenticate,
+  requireManager,
+  staffController.revokeInvitation,
+);
 router.post(
   "/api/hotels/:hotelId/staff",
   authenticate,
@@ -206,35 +263,59 @@ router.patch(
   requireManager,
   staffController.updateStaffMember,
 );
+router.delete(
+  "/api/hotels/:hotelId/staff/:staffId",
+  authenticate,
+  requireManager,
+  staffController.deleteStaffMember,
+);
 router.get(
   "/api/hotels/:hotelId/reservations/availability",
   authenticate,
-  requireManager,
+  requireHotelPermission("rooms.availability.view"),
   reservationController.getAvailability,
 );
 router.get(
   "/api/hotels/:hotelId/reservations/:reservationId/payments",
   authenticate,
-  requireManager,
+  requireHotelPermission("payments.walk_in.create"),
   reservationController.listPayments,
 );
 router.post(
   "/api/hotels/:hotelId/reservations/:reservationId/payments",
   authenticate,
-  requireManager,
+  requireHotelPermission("payments.walk_in.create"),
   reservationController.recordPayment,
 );
 router.get(
   "/api/hotels/:hotelId/reservations",
   authenticate,
-  requireManager,
+  requireHotelPermission("reservations.view"),
   reservationController.listReservations,
 );
 router.post(
   "/api/hotels/:hotelId/reservations",
   authenticate,
-  requireManager,
+  requireHotelPermission("reservations.create"),
   reservationController.createAdminReservation,
+);
+router.post(
+  "/api/hotels/:hotelId/reservations/walk-ins",
+  authenticate,
+  requireHotelPermission("reservations.create"),
+  reservationController.createWalkInReservation,
+);
+router.post(
+  "/api/hotels/:hotelId/reservations/:reservationId/check-in",
+  authenticate,
+  requireHotelPermission("reservations.check_in"),
+  reservationController.checkInReservation,
+);
+router.post(
+  "/api/hotels/:hotelId/reservations/:reservationId/check-out",
+  authenticate,
+  requireHotelPermission("reservations.check_out"),
+  reservationController.checkOutReservation,
 );
 router.patch(
   "/api/hotels/:hotelId/reservations/:reservationId",

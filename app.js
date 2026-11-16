@@ -6,9 +6,11 @@ const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const { Hotel } = require("./src/models");
 const { backfillLegacyReservationGuests } = require("./src/services/guest-service");
+const { startScheduledCheckout } = require("./src/services/reservation-checkout");
 const { assertJwtConfig } = require("./src/utils/jwt");
 const {
   sendPasswordResetEmail,
+  sendStaffInvitationEmail,
   sendVerificationEmail,
 } = require("./src/services/brevo-email");
 const cloudinaryStorage = require("./src/services/cloudinary-storage");
@@ -36,6 +38,7 @@ function createApp() {
   app.use(express.json({ limit: "32kb" }));
   app.locals.sendVerificationCodeEmail = sendVerificationEmail;
   app.locals.sendPasswordResetEmail = sendPasswordResetEmail;
+  app.locals.sendStaffInvitationEmail = sendStaffInvitationEmail;
   app.locals.roomPhotoStorage = cloudinaryStorage;
   app.use(routes);
 
@@ -90,6 +93,7 @@ if (require.main === module) {
       );
       await backfillLegacyReservationGuests();
       await ensurePublicPlans();
+      startScheduledCheckout();
       app.listen(port, () => {
         console.log(`Hotel backend listening on port ${port}`);
       });

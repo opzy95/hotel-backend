@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   sendBrevoEmail,
   sendPasswordResetEmail,
+  sendStaffInvitationEmail,
   sendVerificationEmail,
 } = require("../src/services/brevo-email");
 
@@ -75,6 +76,27 @@ test("password-reset email points to the frontend reset page", async () => {
   const link = new URL(message.textContent.match(/https?:\/\/\S+/)[0]);
   assert.equal(link.pathname, "/reset-password");
   assert.equal(link.searchParams.get("token"), "reset-token");
+});
+
+test("staff invitation email contains a set-password link but no password", async () => {
+  configureEmail();
+  let message;
+  globalThis.fetch = async (_url, options) => {
+    message = JSON.parse(options.body);
+    return { ok: true, status: 201 };
+  };
+
+  await sendStaffInvitationEmail(
+    { email: "receptionist@example.com", hotelId: "hotel-id" },
+    "invitation-token",
+  );
+
+  const link = new URL(message.textContent.match(/https?:\/\/\S+/)[0]);
+  assert.equal(link.pathname, "/accept-invitation");
+  assert.equal(link.searchParams.get("token"), "invitation-token");
+  assert.equal(link.searchParams.get("hotelId"), "hotel-id");
+  assert.match(message.textContent, /set your password/);
+  assert.doesNotMatch(message.textContent, /password\s*[:=]/i);
 });
 
 test("Brevo API errors are surfaced to the caller", async () => {
