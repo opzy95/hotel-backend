@@ -19,6 +19,7 @@ function validationDetails(issues) {
 function sendServiceError(res, error) {
   const status = error === "department_not_found"
     || error === "staff_member_not_found"
+    || error === "receptionist_membership_not_found"
       ? 404
       : 409;
   return res.status(status).json({ error });

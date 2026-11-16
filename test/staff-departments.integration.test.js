@@ -40,6 +40,9 @@ test("staff and department schemas enforce the API contract", () => {
     email: "legacy@example.test",
     permissions: ["payments.walk_in.create"],
   }).success, true);
+  assert.equal(staffMemberInvitationSchema.safeParse({
+    permissions: ["reservations.extend"],
+  }).success, true);
   assert.deepEqual(hotelInvitationSchema.parse({
     email: "r@example.test",
     permissions: ["guests.view"],

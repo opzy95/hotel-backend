@@ -180,8 +180,10 @@ and `{ "email": "...", "permissions": ["reservations.view", ...] }`. If
 `permissions` is omitted, the invitation grants the supported receptionist
 actions: `reservations.view`, `reservations.create`, `guests.view`,
 `guests.create`, `reservations.check_in`, `reservations.check_out`,
-`rooms.availability.view`, and `payments.walk_in.create`. Managers can select
-a subset; manager-only permissions are not accepted. The email contains a
+`reservations.extend`, `rooms.availability.view`, and
+`payments.walk_in.create`. Managers can select a subset; manager-only
+permissions are not accepted. Regardless of the selected subset, active
+receptionist memberships are allowed to extend stays. The email contains a
 single-use link that expires after seven days. Resending replaces the token;
 revoking invalidates it. The API stores only a token hash and never creates a
 password before acceptance.
@@ -402,7 +404,26 @@ respective hotel-scoped permissions.
 `PATCH /api/hotels/{hotelId}/reservations/{reservationId}` accepts partial guest
 details, both `checkIn` and `checkOut` together, `roomTypeId` with an optional
 `assignedRoomId`, guest counts, or `status`. Payment status cannot be set
-directly.
+directly. This general update route is manager-only.
+
+Receptionists can extend a confirmed or checked-in stay with:
+
+```http
+POST /api/hotels/{hotelId}/reservations/{reservationId}/extend
+Content-Type: application/json
+
+{ "checkOut": "2027-06-13" }
+```
+
+The new date must be after the existing checkout date. The backend checks that
+the assigned room remains available, preserves the reservation's nightly rate,
+and recalculates nights, total, and payment balance. Success returns
+`{ "reservation": ... }` with updated `checkOut`, `pricing`, and
+`paymentSummary`. Every active receptionist membership is authorized for this
+action; `/api/auth/me` includes `reservations.extend` even for existing
+memberships. A room conflict returns `409 assigned_room_unavailable`;
+non-extendable reservation statuses return
+`409 reservation_stay_extension_not_allowed`.
 
 Record a full or partial admin-collected payment with
 `POST /api/hotels/{hotelId}/reservations/{reservationId}/payments`:

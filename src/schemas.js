@@ -43,11 +43,12 @@ const actionTokenSchema = z.object({
   token: z.string().regex(/^[a-f\d]{64}$/i),
 });
 
-const receptionistPermissionsSchema = z.array(z.enum(RECEPTIONIST_PERMISSIONS))
+const receptionistPermissionListSchema = z.array(z.enum(RECEPTIONIST_PERMISSIONS))
   .max(RECEPTIONIST_PERMISSIONS.length)
   .refine((permissions) => new Set(permissions).size === permissions.length, {
     message: "Permissions must not contain duplicates",
-  })
+  });
+const receptionistPermissionsSchema = receptionistPermissionListSchema
   .optional().default(DEFAULT_RECEPTIONIST_PERMISSIONS);
 
 const hotelInvitationSchema = z.object({
@@ -332,6 +333,13 @@ const reservationUpdateSchema = z.object({
   { message: "Check-out must be after check-in", path: ["checkOut"] },
 );
 
+const reservationExtensionSchema = z.object({
+  checkOut: reservationFields.checkOut,
+}).refine(
+  (extension) => validDateOnly(extension.checkOut),
+  { message: "Invalid calendar date", path: ["checkOut"] },
+);
+
 module.exports = {
   adminReservationSchema,
   actionTokenSchema,
@@ -352,6 +360,7 @@ module.exports = {
   publicReservationSchema,
   registrationSchema,
   reservationAvailabilitySchema,
+  reservationExtensionSchema,
   reservationIdSchema,
   reservationListSchema,
   reservationLookupSchema,

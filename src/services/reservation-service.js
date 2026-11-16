@@ -664,6 +664,96 @@ async function updateReservation(hotelId, reservationId, data) {
   }
 }
 
+async function extendReservation(hotelId, reservationId, data) {
+  const session = await mongoose.startSession();
+  let result;
+
+  try {
+    await session.withTransaction(async () => {
+      const current = await Reservation.findOne({ _id: reservationId, hotelId }).session(session);
+      if (!current) {
+        result = { error: "reservation_not_found" };
+        return;
+      }
+      if (!["confirmed", "checked_in"].includes(current.status)) {
+        result = { error: "reservation_stay_extension_not_allowed" };
+        return;
+      }
+
+      const nextCheckOut = toDate(data.checkOut);
+      if (nextCheckOut <= current.checkOut) {
+        result = { error: "reservation_extension_must_add_nights" };
+        return;
+      }
+
+      const nights = nightsBetween(
+        current.checkIn.toISOString().slice(0, 10),
+        data.checkOut,
+      );
+      if (nights < 1 || !Number.isInteger(nights)) {
+        result = { error: "invalid_stay_dates" };
+        return;
+      }
+
+      await lockRoomTypes(hotelId, [current.roomTypeId], session);
+      const roomType = await RoomType.findOne({
+        _id: current.roomTypeId,
+        hotelId,
+        active: true,
+      }).session(session).lean();
+      if (!roomType) {
+        result = { error: "room_type_not_found" };
+        return;
+      }
+
+      const availability = await findAvailableRoom(
+        hotelId,
+        current.roomTypeId,
+        current.checkIn,
+        nextCheckOut,
+        session,
+        {
+          excludeReservationId: current._id,
+          assignedRoomId: current.roomId,
+        },
+      );
+      if (availability.error) {
+        result = availability;
+        return;
+      }
+
+      const amount = totalMinor(current.rateMinorPerNight, nights);
+      if (amount === null) {
+        result = { error: "reservation_total_exceeded" };
+        return;
+      }
+      const amountPaidMinor = current.amountPaidMinor || 0;
+      current.set({
+        checkOut: nextCheckOut,
+        nights,
+        totalMinor: amount,
+        paymentStatus: amountPaidMinor >= amount
+          ? "paid"
+          : amountPaidMinor > 0
+            ? "partially_paid"
+            : "unpaid",
+      });
+      await current.save({ session });
+
+      result = {
+        reservation: reservationResource({
+          ...current.toObject(),
+          roomTypeId: roomType,
+          roomId: availability.room,
+        }, { includePaymentSummary: true }),
+      };
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
+
 function roomTypeChanged(previousId, nextId) {
   return previousId.toString() !== nextId.toString();
 }
@@ -671,6 +761,7 @@ function roomTypeChanged(previousId, nextId) {
 module.exports = {
   createPublicReservation,
   createReservation,
+  extendReservation,
   getAvailability,
   listPayments,
   listReservations,

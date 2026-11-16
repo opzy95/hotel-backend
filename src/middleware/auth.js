@@ -82,7 +82,10 @@ function requireHotelPermission(permission) {
     const permissions = membership.permissions || [];
     const hasPaymentPermission = permissions.includes("payments.create")
       || permissions.includes("payments.walk_in.create");
+    const receptionistCanExtendStay = permission === "reservations.extend"
+      && membership.role === "receptionist";
     const hasPermission = permissions.includes(permission)
+      || receptionistCanExtendStay
       || (
         ["payments.create", "payments.walk_in.create"].includes(permission)
         && hasPaymentPermission

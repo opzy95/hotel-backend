@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 
 const testMongoUri = process.env.TEST_MONGO_URI;
 
-test("hotel managers invite receptionists with scoped permissions and walk-in payments", {
+test("hotel managers invite receptionists with scoped permissions, stay extensions, and payments", {
   skip: !testMongoUri,
 }, async () => {
   const databaseName = decodeURIComponent(new URL(testMongoUri).pathname.slice(1));
@@ -538,6 +538,59 @@ test("hotel managers invite receptionists with scoped permissions and walk-in pa
     );
     assert.equal(checkInResponse.status, 200);
     assert.equal((await checkInResponse.json()).reservation.status, "checked_in");
+
+    const extensionPath = `${hotelPath}/reservations/${walkInReservation.id}/extend`;
+    const legacyReceptionistPermissions = DEFAULT_RECEPTIONIST_PERMISSIONS.filter(
+      (permission) => permission !== "reservations.extend",
+    );
+    await HotelMembership.updateOne(
+      { _id: acceptedMembership._id },
+      { $set: { permissions: legacyReceptionistPermissions } },
+    );
+    const legacyProfileResponse = await receptionistRequest("/api/auth/me");
+    const legacyProfile = await legacyProfileResponse.json();
+    const legacyMembership = legacyProfile.memberships.find(
+      (item) => item.hotelId.toString() === hotel._id.toString(),
+    );
+    assert.ok(legacyMembership.permissions.includes("reservations.extend"));
+
+    const nextReservationResponse = await request(`${hotelPath}/reservations`, "POST", {
+      ...reservationData,
+      guestName: "Next Reservation",
+      guestEmail: `next-${suffix}@example.test`,
+      checkIn: date(3),
+      checkOut: date(4),
+      assignedRoomId: rooms[0]._id.toString(),
+    });
+    assert.equal(nextReservationResponse.status, 201);
+    const nextReservation = (await nextReservationResponse.json()).reservation;
+
+    const conflictingExtensionResponse = await receptionistRequest(
+      extensionPath,
+      "POST",
+      { checkOut: date(4) },
+    );
+    assert.equal(conflictingExtensionResponse.status, 409);
+
+    const cancelNextReservationResponse = await request(
+      `${hotelPath}/reservations/${nextReservation.id}`,
+      "PATCH",
+      { status: "cancelled" },
+    );
+    assert.equal(cancelNextReservationResponse.status, 200);
+
+    const extensionResponse = await receptionistRequest(
+      extensionPath,
+      "POST",
+      { checkOut: date(3) },
+    );
+    assert.equal(extensionResponse.status, 200);
+    const extendedReservation = (await extensionResponse.json()).reservation;
+    assert.equal(extendedReservation.checkOut, date(3));
+    assert.equal(extendedReservation.pricing.nights, 3);
+    assert.equal(extendedReservation.pricing.totalMinor, 37500);
+    assert.equal(extendedReservation.paymentSummary.balanceDueMinor, 32500);
+
     const checkOutResponse = await receptionistRequest(
       `${hotelPath}/reservations/${walkInReservation.id}/check-out`,
       "POST",
@@ -559,10 +612,12 @@ test("hotel managers invite receptionists with scoped permissions and walk-in pa
       ),
       "payments.create",
     ];
-    await HotelMembership.updateOne(
-      { _id: acceptedMembership._id },
-      { $set: { permissions: aliasPaymentPermissions } },
+    const updatePaymentPermissionsResponse = await request(
+      `${hotelPath}/staff/${receptionistStaff._id}/permissions`,
+      "PATCH",
+      { permissions: aliasPaymentPermissions },
     );
+    assert.equal(updatePaymentPermissionsResponse.status, 200);
     const aliasProfileResponse = await receptionistRequest("/api/auth/me");
     const aliasProfile = await aliasProfileResponse.json();
     const aliasMembership = aliasProfile.memberships.find(

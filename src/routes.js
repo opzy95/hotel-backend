@@ -317,6 +317,12 @@ router.post(
   requireHotelPermission("reservations.check_out"),
   reservationController.checkOutReservation,
 );
+router.post(
+  "/api/hotels/:hotelId/reservations/:reservationId/extend",
+  authenticate,
+  requireHotelPermission("reservations.extend"),
+  reservationController.extendReservation,
+);
 router.patch(
   "/api/hotels/:hotelId/reservations/:reservationId",
   authenticate,

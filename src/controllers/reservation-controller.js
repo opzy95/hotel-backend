@@ -3,6 +3,7 @@ const {
   adminReservationSchema,
   publicReservationSchema,
   reservationAvailabilitySchema,
+  reservationExtensionSchema,
   reservationIdSchema,
   reservationListSchema,
   reservationLookupSchema,
@@ -186,6 +187,28 @@ async function checkOutReservation(req, res) {
   return changeReservationStayStatus(req, res, "checked_out");
 }
 
+async function extendReservation(req, res) {
+  if (!reservationIdSchema.safeParse(req.params.reservationId).success) {
+    return res.status(404).json({ error: "reservation_not_found" });
+  }
+  const parsed = reservationExtensionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "validation_error",
+      details: validationDetails(parsed.error.issues),
+    });
+  }
+  const result = await reservationService.extendReservation(
+    req.params.hotelId,
+    req.params.reservationId,
+    parsed.data,
+  );
+  if (result.error) {
+    return sendServiceError(res, result.error);
+  }
+  return res.json(result);
+}
+
 async function updateReservation(req, res) {
   if (!reservationIdSchema.safeParse(req.params.reservationId).success) {
     return res.status(404).json({ error: "reservation_not_found" });
@@ -214,6 +237,7 @@ module.exports = {
   createAdminReservation,
   createPublicReservation,
   createWalkInReservation,
+  extendReservation,
   getAvailability,
   listPayments,
   listReservations,

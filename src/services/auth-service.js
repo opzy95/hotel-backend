@@ -395,8 +395,11 @@ async function getCurrentUser(user) {
       const hasPaymentPermission = permissions.includes("payments.create")
         || permissions.includes("payments.walk_in.create");
       const normalizedPermissions = membership.role === "receptionist"
-        && hasPaymentPermission
-        ? [...new Set([...permissions, "payments.create", "payments.walk_in.create"])]
+        ? [...new Set([
+          ...permissions,
+          "reservations.extend",
+          ...(hasPaymentPermission ? ["payments.create", "payments.walk_in.create"] : []),
+        ])]
         : permissions;
       return {
         hotelId: membership.hotelId._id,

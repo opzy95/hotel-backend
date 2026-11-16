@@ -5,6 +5,7 @@ const DEFAULT_RECEPTIONIST_PERMISSIONS = Object.freeze([
   "guests.create",
   "reservations.check_in",
   "reservations.check_out",
+  "reservations.extend",
   "rooms.availability.view",
   "payments.walk_in.create",
 ]);
@@ -12,6 +13,7 @@ const DEFAULT_RECEPTIONIST_PERMISSIONS = Object.freeze([
 const RECEPTIONIST_PERMISSIONS = Object.freeze([
   ...DEFAULT_RECEPTIONIST_PERMISSIONS,
   "payments.create",
+  "reservations.extend",
 ]);
 
 module.exports = {
