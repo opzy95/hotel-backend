@@ -219,6 +219,7 @@ const reservationSchema = new Schema({
 }, { timestamps: true });
 reservationSchema.index({ hotelId: 1, createdAt: -1 });
 reservationSchema.index({ guestId: 1 });
+reservationSchema.index({ guestEmail: 1, status: 1, checkIn: 1 });
 reservationSchema.index({ hotelId: 1, status: 1, checkIn: 1 });
 reservationSchema.index({ hotelId: 1, roomId: 1, status: 1, checkIn: 1, checkOut: 1 });
 

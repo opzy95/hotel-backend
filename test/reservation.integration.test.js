@@ -61,7 +61,29 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
       status: "active",
       settings: { currency: "USD" },
     });
-    createdHotelIds.push(hotel._id);
+    const otherHotel = await Hotel.create({
+      name: "Other Reservation Hotel",
+      email: `other-reservation-hotel-${suffix}@example.test`,
+      phone: "+10000000002",
+      address: { line1: "2 Test Street", city: "Test", country: "US" },
+      type: "test",
+      roomCount: 1,
+      slug: `other-reservation-${suffix}`,
+      status: "active",
+      settings: { currency: "USD" },
+    });
+    const inactiveHotel = await Hotel.create({
+      name: "Inactive Reservation Hotel",
+      email: `inactive-reservation-hotel-${suffix}@example.test`,
+      phone: "+10000000003",
+      address: { line1: "3 Test Street", city: "Test", country: "US" },
+      type: "test",
+      roomCount: 1,
+      slug: `inactive-reservation-${suffix}`,
+      status: "suspended",
+      settings: { currency: "USD" },
+    });
+    createdHotelIds.push(hotel._id, otherHotel._id, inactiveHotel._id);
     await HotelMembership.create({
       hotelId: hotel._id,
       userId: manager._id,
@@ -78,11 +100,27 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
       baseRateMinor: 12500,
       currency: "USD",
     });
+    const otherRoomType = await RoomType.create({
+      hotelId: otherHotel._id,
+      name: "Other Standard",
+      nameKey: "other standard",
+      sizeSqm: 22,
+      maxGuests: 2,
+      bedSetup: [{ type: "queen", count: 1 }],
+      baseRateMinor: 5000,
+      currency: "USD",
+    });
     await Room.create({
       hotelId: hotel._id,
       code: "101",
       codeKey: "101",
       roomTypeId: roomType._id,
+    });
+    await Room.create({
+      hotelId: otherHotel._id,
+      code: "201",
+      codeKey: "201",
+      roomTypeId: otherRoomType._id,
     });
 
     const day = (offset) => {
@@ -100,8 +138,83 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
       roomTypeId: roomType._id.toString(),
       adults: 2,
       children: 0,
-      totalMinor: 1,
     };
+    const publicHotelsResponse = await fetch(`${baseUrl}/api/public/hotels`);
+    assert.equal(publicHotelsResponse.status, 200);
+    const publicHotels = (await publicHotelsResponse.json()).hotels;
+    assert.deepEqual(
+      publicHotels.find((listedHotel) => listedHotel.slug === hotel.slug),
+      { name: hotel.name, slug: hotel.slug },
+    );
+    assert.deepEqual(
+      publicHotels.find((listedHotel) => listedHotel.slug === otherHotel.slug),
+      { name: otherHotel.name, slug: otherHotel.slug },
+    );
+    assert.equal(
+      publicHotels.some((listedHotel) => listedHotel.slug === inactiveHotel.slug),
+      false,
+    );
+
+    const publicHotelResponse = await fetch(`${baseUrl}/api/public/hotels/${hotel.slug}`);
+    assert.equal(publicHotelResponse.status, 200);
+    const publicHotel = (await publicHotelResponse.json()).hotel;
+    assert.equal(publicHotel.name, hotel.name);
+    assert.equal(publicHotel.slug, hotel.slug);
+    assert.equal("id" in publicHotel, false);
+    assert.equal("email" in publicHotel, false);
+    assert.equal("status" in publicHotel, false);
+
+    const inactiveHotelResponse = await fetch(
+      `${baseUrl}/api/public/hotels/${inactiveHotel.slug}`,
+    );
+    assert.equal(inactiveHotelResponse.status, 404);
+
+    const publicAvailabilityUrl = new URL(
+      `${baseUrl}/api/public/hotels/${hotel.slug}/availability`,
+    );
+    publicAvailabilityUrl.search = new URLSearchParams({
+      checkIn: payload.checkIn,
+      checkOut: payload.checkOut,
+      adults: String(payload.adults),
+      children: String(payload.children),
+    });
+    const publicAvailabilityResponse = await fetch(publicAvailabilityUrl);
+    assert.equal(publicAvailabilityResponse.status, 200);
+    const publicAvailability = await publicAvailabilityResponse.json();
+    assert.equal(publicAvailability.roomTypes.length, 1);
+    assert.equal(publicAvailability.roomTypes[0].name, "Standard");
+    assert.equal(publicAvailability.roomTypes[0].maxGuests, 2);
+    assert.equal(publicAvailability.roomTypes[0].availableRoomCount, 1);
+    assert.equal(publicAvailability.roomTypes[0].pricing.totalMinor, 25000);
+    assert.equal(publicAvailability.roomTypes[0].pricing.currency, "USD");
+    assert.equal(publicAvailability.roomTypes[0].pricing.feesMinor, 0);
+    assert.deepEqual(publicAvailability.roomTypes[0].pricing.fees, []);
+
+    const forgedReservationResponse = await fetch(`${baseUrl}/api/public/reservations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        hotelId: otherHotel._id.toString(),
+        roomId: "0123456789abcdef01234568",
+        totalMinor: 1,
+      }),
+    });
+    assert.equal(forgedReservationResponse.status, 400);
+    assert.equal((await forgedReservationResponse.json()).error, "validation_error");
+
+    const otherHotelRoomTypeResponse = await fetch(`${baseUrl}/api/public/reservations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        roomTypeId: otherRoomType._id.toString(),
+        guestEmail: `other-guest-${suffix}@example.test`,
+      }),
+    });
+    assert.equal(otherHotelRoomTypeResponse.status, 404);
+    assert.equal((await otherHotelRoomTypeResponse.json()).error, "room_type_not_found");
+
     const managerToken = signAccessToken(manager._id);
     const managerHeaders = {
       "content-type": "application/json",
@@ -147,6 +260,12 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     assert.equal(created.paymentStatus, "unpaid");
     assert.equal(created.status, "confirmed");
     assert.equal(created.assignedRoom.code, "101");
+    const storedReservation = await Reservation.findById(created.id).lean();
+    assert.equal(storedReservation.hotelId.toString(), hotel._id.toString());
+
+    const afterPublicBookingAvailability = await fetch(publicAvailabilityUrl);
+    assert.equal(afterPublicBookingAvailability.status, 200);
+    assert.deepEqual((await afterPublicBookingAvailability.json()).roomTypes, []);
 
     const reservationsUrl = `${baseUrl}/api/hotels/${hotel._id}/reservations`;
     const reservationsResponse = await fetch(reservationsUrl, {
@@ -293,6 +412,38 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     });
     assert.equal(lookupResponse.status, 200);
     assert.equal((await lookupResponse.json()).reservation.id, created.id);
+
+    let emailedReferences;
+    app.locals.sendUpcomingReservationReferencesEmail = async (email, references) => {
+      emailedReferences = { email, references };
+    };
+    const referenceEmailResponse = await fetch(
+      `${baseUrl}/api/public/reservations/reference-email`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ email: payload.guestEmail.toUpperCase() }),
+      },
+    );
+    assert.equal(referenceEmailResponse.status, 202);
+    const referenceEmailResult = await referenceEmailResponse.json();
+    assert.equal(emailedReferences.email, payload.guestEmail);
+    assert.deepEqual(emailedReferences.references, [{
+      reference: created.reference,
+      hotelName: hotel.name,
+      checkIn: payload.checkIn,
+    }]);
+
+    const noMatchReferenceEmailResponse = await fetch(
+      `${baseUrl}/api/public/reservations/reference-email`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ email: "no-booking@example.test" }),
+      },
+    );
+    assert.equal(noMatchReferenceEmailResponse.status, 202);
+    assert.deepEqual(await noMatchReferenceEmailResponse.json(), referenceEmailResult);
 
     const cancelResponse = await fetch(
       `${baseUrl}/api/hotels/${hotel._id}/reservations/${created.id}`,

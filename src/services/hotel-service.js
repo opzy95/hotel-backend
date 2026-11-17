@@ -9,7 +9,7 @@ const {
   User,
 } = require("../models");
 const { expireSubscriptions } = require("./subscription-lifecycle");
-const { publicHotel } = require("../utils/public-resources");
+const { publicHotel, publicHotelDetails } = require("../utils/public-resources");
 
 async function createHotelWorkspace(hotelDetails, manager, session) {
   const slugBase = hotelDetails.name
@@ -56,6 +56,25 @@ async function createHotel(details, manager) {
     await session.endSession();
   }
   return hotel;
+}
+
+async function findActiveHotelBySlug(slug) {
+  return Hotel.findOne({ slug, status: "active" })
+    .select("name slug phone address type settings")
+    .lean();
+}
+
+async function getPublicHotelBySlug(slug) {
+  const hotel = await findActiveHotelBySlug(slug);
+  return hotel ? publicHotelDetails(hotel) : null;
+}
+
+async function listPublicHotels() {
+  const hotels = await Hotel.find({ status: "active" })
+    .select("name slug")
+    .sort({ name: 1 })
+    .lean();
+  return hotels.map(({ name, slug }) => ({ name, slug }));
 }
 
 async function getPublicPlans() {
@@ -229,7 +248,10 @@ async function updateSettings(hotelId, settings) {
 module.exports = {
   createHotel,
   createHotelWorkspace,
+  findActiveHotelBySlug,
+  getPublicHotelBySlug,
   getOnboarding,
+  listPublicHotels,
   getPublicPlans,
   publicHotel,
   selectSubscriptionPlan,

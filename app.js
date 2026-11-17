@@ -11,6 +11,7 @@ const { assertJwtConfig } = require("./src/utils/jwt");
 const {
   sendPasswordResetEmail,
   sendStaffInvitationEmail,
+  sendUpcomingReservationReferencesEmail,
   sendVerificationEmail,
 } = require("./src/services/brevo-email");
 const cloudinaryStorage = require("./src/services/cloudinary-storage");
@@ -39,6 +40,7 @@ function createApp() {
   app.locals.sendVerificationCodeEmail = sendVerificationEmail;
   app.locals.sendPasswordResetEmail = sendPasswordResetEmail;
   app.locals.sendStaffInvitationEmail = sendStaffInvitationEmail;
+  app.locals.sendUpcomingReservationReferencesEmail = sendUpcomingReservationReferencesEmail;
   app.locals.roomPhotoStorage = cloudinaryStorage;
   app.use(routes);
 

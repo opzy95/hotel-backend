@@ -235,7 +235,7 @@ function validStayDates(reservation) {
     && reservation.checkOut > reservation.checkIn;
 }
 
-const publicReservationSchema = z.object({
+const publicReservationSchema = z.strictObject({
   hotelSlug: z.string().trim().min(2).max(120),
   ...reservationFields,
 }).refine(validStayDates, {
@@ -282,6 +282,18 @@ const reservationAvailabilitySchema = z.object({
   path: ["checkOut"],
 });
 
+const publicAvailabilitySchema = z.object({
+  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  adults: z.coerce.number().int().min(1).max(100),
+  children: z.coerce.number().int().min(0).max(100).default(0),
+}).refine(validStayDates, {
+  message: "Check-out must be after check-in",
+  path: ["checkOut"],
+});
+
+const publicHotelSlugSchema = z.string().trim().min(2).max(120);
+
 const reservationPaymentSchema = z.object({
   amountMinor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   method: z.enum(["cash", "card", "bank_transfer", "mobile_money", "other"]),
@@ -321,7 +333,7 @@ const reservationUpdateSchema = z.object({
   roomTypeId: roomIdSchema.optional(),
   assignedRoomId: roomIdSchema.optional(),
   adults: reservationFields.adults.optional(),
-  children: reservationFields.children.optional(),
+  children: z.number().int().min(0).max(100).optional(),
   status: z.enum(["confirmed", "cancelled", "checked_in", "checked_out", "no_show"]).optional(),
 }).refine((reservation) => Object.keys(reservation).length > 0, {
   message: "At least one field is required",
@@ -357,6 +369,8 @@ module.exports = {
   paginationSchema,
   planSchema,
   planSelectionSchema,
+  publicAvailabilitySchema,
+  publicHotelSlugSchema,
   publicReservationSchema,
   registrationSchema,
   reservationAvailabilitySchema,

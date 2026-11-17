@@ -1,5 +1,5 @@
 const express = require("express");
-const { rateLimit } = require("express-rate-limit");
+const { ipKeyGenerator, rateLimit } = require("express-rate-limit");
 const authController = require("./controllers/auth-controller");
 const guestController = require("./controllers/guest-controller");
 const hotelController = require("./controllers/hotel-controller");
@@ -59,9 +59,33 @@ const publicReservationLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
+const publicHotelLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
 const reservationLookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+const reservationReferenceIpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+const reservationReferenceEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  keyGenerator: (req) => {
+    const email = req.body?.email;
+    return typeof email === "string" && email.trim()
+      ? `email:${email.trim().toLowerCase()}`
+      : ipKeyGenerator(req.ip);
+  },
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
@@ -73,6 +97,21 @@ router.get("/", (_req, res) => {
   res.json({ message: "Hotel backend is running" });
 });
 router.get("/api/public/plans", hotelController.publicPlans);
+router.get(
+  "/api/public/hotels",
+  publicHotelLimiter,
+  hotelController.publicHotels,
+);
+router.get(
+  "/api/public/hotels/:hotelSlug",
+  publicHotelLimiter,
+  hotelController.publicHotelBySlug,
+);
+router.get(
+  "/api/public/hotels/:hotelSlug/availability",
+  publicHotelLimiter,
+  reservationController.getPublicAvailability,
+);
 router.post(
   "/api/public/reservations",
   publicReservationLimiter,
@@ -82,6 +121,12 @@ router.post(
   "/api/public/reservations/lookup",
   reservationLookupLimiter,
   reservationController.lookupPublicReservation,
+);
+router.post(
+  "/api/public/reservations/reference-email",
+  reservationReferenceIpLimiter,
+  reservationReferenceEmailLimiter,
+  reservationController.requestUpcomingReservationReferences,
 );
 
 router.post("/api/auth/register", registrationLimiter, authController.register);

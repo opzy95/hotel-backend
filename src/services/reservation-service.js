@@ -8,7 +8,9 @@ const {
   Room,
   RoomType,
 } = require("../models");
+const { findActiveHotelBySlug } = require("./hotel-service");
 const { upsertGuestProfile } = require("./guest-service");
+const { publicHotelDetails } = require("../utils/public-resources");
 
 const INVENTORY_STATUSES = ["confirmed", "checked_in"];
 
@@ -18,6 +20,17 @@ function toDate(value) {
 
 function nightsBetween(checkIn, checkOut) {
   return (toDate(checkOut).getTime() - toDate(checkIn).getTime()) / 86400000;
+}
+
+function dateInTimezone(timeZone, date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const dateParts = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
 }
 
 function reservationPaymentSummary(reservation) {
@@ -343,6 +356,99 @@ async function getAvailability(hotelId, data) {
   };
 }
 
+async function getPublicAvailability(hotelSlug, data) {
+  const hotel = await findActiveHotelBySlug(hotelSlug);
+  if (!hotel) {
+    return { error: "hotel_not_found" };
+  }
+
+  const checkIn = toDate(data.checkIn);
+  const checkOut = toDate(data.checkOut);
+  const nights = nightsBetween(data.checkIn, data.checkOut);
+  const guestCount = data.adults + data.children;
+  const roomTypes = await RoomType.find({
+    hotelId: hotel._id,
+    active: true,
+    maxGuests: { $gte: guestCount },
+  }).sort({ name: 1 }).lean();
+  const roomTypeIds = roomTypes.map((roomType) => roomType._id);
+  const rooms = roomTypeIds.length
+    ? await Room.find({
+      hotelId: hotel._id,
+      roomTypeId: { $in: roomTypeIds },
+      active: true,
+    }).select("_id roomTypeId").lean()
+    : [];
+  const reservations = rooms.length
+    ? await Reservation.find({
+      hotelId: hotel._id,
+      roomId: { $in: rooms.map((room) => room._id) },
+      status: { $in: INVENTORY_STATUSES },
+      checkIn: { $lt: checkOut },
+      checkOut: { $gt: checkIn },
+    }).select("roomId").lean()
+    : [];
+  const occupiedRoomIds = new Set(
+    reservations.map((reservation) => reservation.roomId.toString()),
+  );
+  const availableCountByRoomType = new Map(
+    roomTypeIds.map((id) => [id.toString(), 0]),
+  );
+  for (const room of rooms) {
+    if (!occupiedRoomIds.has(room._id.toString())) {
+      const roomTypeId = room.roomTypeId.toString();
+      availableCountByRoomType.set(
+        roomTypeId,
+        availableCountByRoomType.get(roomTypeId) + 1,
+      );
+    }
+  }
+
+  const availableRoomTypes = [];
+  for (const roomType of roomTypes) {
+    const availableRoomCount = availableCountByRoomType.get(roomType._id.toString());
+    if (!availableRoomCount) {
+      continue;
+    }
+    const subtotalMinor = totalMinor(roomType.baseRateMinor, nights);
+    if (subtotalMinor === null) {
+      return { error: "reservation_total_exceeded" };
+    }
+    availableRoomTypes.push({
+      id: roomType._id,
+      name: roomType.name,
+      description: roomType.description,
+      sizeSqm: roomType.sizeSqm,
+      maxGuests: roomType.maxGuests,
+      bedSetup: roomType.bedSetup,
+      amenities: roomType.amenities,
+      photos: roomType.photos.map((photo) => ({
+        secureUrl: photo.secureUrl,
+        width: photo.width,
+        height: photo.height,
+        format: photo.format,
+      })),
+      availableRoomCount,
+      pricing: {
+        nights,
+        rateMinorPerNight: roomType.baseRateMinor,
+        subtotalMinor,
+        feesMinor: 0,
+        fees: [],
+        totalMinor: subtotalMinor,
+        currency: roomType.currency,
+      },
+    });
+  }
+
+  return {
+    hotel: publicHotelDetails(hotel),
+    stay: { checkIn: data.checkIn, checkOut: data.checkOut, nights },
+    guests: { adults: data.adults, children: data.children },
+    roomTypes: availableRoomTypes,
+  };
+}
+
 async function createReservation(hotelId, data, source) {
   const checkIn = toDate(data.checkIn);
   const checkOut = toDate(data.checkOut);
@@ -430,9 +536,7 @@ async function createReservation(hotelId, data, source) {
 }
 
 async function createPublicReservation(data) {
-  const hotel = await Hotel.findOne({ slug: data.hotelSlug, status: "active" })
-    .select("_id")
-    .lean();
+  const hotel = await findActiveHotelBySlug(data.hotelSlug);
   if (!hotel) {
     return { error: "hotel_not_found" };
   }
@@ -447,6 +551,46 @@ async function lookupReservation(reference, email) {
   return reservation
     ? { reservation: reservationResource(reservation) }
     : { error: "reservation_not_found" };
+}
+
+async function sendUpcomingReservationReferences(email, sendEmail) {
+  const now = new Date();
+  const earliestCheckIn = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - 1,
+  ));
+  const reservations = await Reservation.find({
+    guestEmail: email.toLowerCase(),
+    status: "confirmed",
+    checkIn: { $gte: earliestCheckIn },
+  })
+    .select("reference checkIn hotelId")
+    .populate({ path: "hotelId", select: "name settings.timezone" })
+    .sort({ checkIn: 1 })
+    .lean();
+  const references = reservations
+    .filter((reservation) => (
+      reservation.hotelId
+      && reservation.checkIn.toISOString().slice(0, 10)
+        >= dateInTimezone(reservation.hotelId.settings?.timezone || "UTC", now)
+    ))
+    .map((reservation) => ({
+      reference: reservation.reference,
+      hotelName: reservation.hotelId.name,
+      checkIn: reservation.checkIn.toISOString().slice(0, 10),
+    }));
+
+  if (!references.length) {
+    return { sent: false };
+  }
+  try {
+    await sendEmail(email.toLowerCase(), references);
+  } catch (error) {
+    console.error("Reservation reference email delivery failed", error);
+    return { error: "email_delivery_unavailable" };
+  }
+  return { sent: true };
 }
 
 async function listReservations(hotelId, query) {
@@ -763,10 +907,12 @@ module.exports = {
   createReservation,
   extendReservation,
   getAvailability,
+  getPublicAvailability,
   listPayments,
   listReservations,
   lookupReservation,
   recordPayment,
   reservationResource,
+  sendUpcomingReservationReferences,
   updateReservation,
 };

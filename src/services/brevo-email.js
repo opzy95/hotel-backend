@@ -125,10 +125,26 @@ async function sendStaffInvitationEmail(invitation, token) {
   });
 }
 
+async function sendUpcomingReservationReferencesEmail(email, reservations) {
+  const rows = reservations.map((reservation) => (
+    `${reservation.hotelName} - ${reservation.reference} - check-in ${reservation.checkIn}`
+  ));
+  const htmlRows = reservations.map((reservation) => (
+    `<li>${escapeHtml(reservation.hotelName)} - <strong>${escapeHtml(reservation.reference)}</strong> - check-in ${escapeHtml(reservation.checkIn)}</li>`
+  ));
+  await sendBrevoEmail({
+    to: { email, name: email },
+    subject: "Your upcoming reservation reference(s)",
+    text: `Upcoming reservations linked to this email:\n\n${rows.join("\n")}\n\nIf you did not request this email, you can ignore it.`,
+    html: `<p>Upcoming reservations linked to this email:</p><ul>${htmlRows.join("")}</ul><p>If you did not request this email, you can ignore it.</p>`,
+  });
+}
+
 module.exports = {
   getEmailConfiguration,
   sendBrevoEmail,
   sendPasswordResetEmail,
   sendStaffInvitationEmail,
+  sendUpcomingReservationReferencesEmail,
   sendVerificationEmail,
 };

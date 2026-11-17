@@ -56,6 +56,9 @@ expiry, issuer, and audience checks.
 |---|---|---|---|
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
+| `GET` | `/api/public/hotels` | Public, rate-limited | List active hotels by name and slug |
+| `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details |
+| `GET` | `/api/public/hotels/{hotelSlug}/availability` | Public, rate-limited | Search available room types and server-calculated pricing for dates and guest counts |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant, Manager membership, and pending subscription |
 | `POST` | `/api/auth/accept-invitation` | Public, rate-limited | Accept a single-use hotel staff invitation and set a password |
 | `POST` | `/api/auth/login` | Public, rate-limited | Sign in; configured frontend origin also receives an HttpOnly refresh cookie |
@@ -97,6 +100,7 @@ expiry, issuer, and audience checks.
 | `DELETE` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Delete a staff record; also revoke associated receptionist access and pending invitations |
 | `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug |
 | `POST` | `/api/public/reservations/lookup` | Public, rate-limited | Retrieve a reservation with its reference and guest email |
+| `POST` | `/api/public/reservations/reference-email` | Public, rate-limited | Email references for upcoming reservations matching a guest email |
 | `GET` | `/api/hotels/{hotelId}/reservations` | Manager or receptionist with `reservations.view` | List reservations with pagination and optional search/status/check-in-date filters |
 | `POST` | `/api/hotels/{hotelId}/reservations` | Manager or receptionist with `reservations.create` | Create an admin reservation and assign a physical room |
 | `POST` | `/api/hotels/{hotelId}/reservations/walk-ins` | Manager or receptionist with `reservations.create` | Create a walk-in reservation eligible for receptionist payment recording |
@@ -276,9 +280,10 @@ transaction, so the deployment must use a replica set (as required for signup).
 
 The server ignores client-supplied prices and calculates
 `roomType.baseRateMinor * nights`, storing the rate, currency, and total as a
-snapshot in integer minor units. No taxes, discounts, or payment-provider
-processing is applied. New reservations are `confirmed`; a nonzero total starts
-as `unpaid`, while a zero total is immediately settled.
+snapshot in integer minor units. Public availability quotes currently report
+zero additional fees (`feesMinor: 0`, `fees: []`); no taxes, discounts, or
+payment-provider processing is applied. New reservations are `confirmed`; a
+nonzero total starts as `unpaid`, while a zero total is immediately settled.
 Reservation payment status is derived from recorded amounts: `unpaid`,
 `partially_paid`, or `paid`. Reservation statuses are `confirmed`, `cancelled`,
 `checked_in`, `checked_out`, and `no_show`. A cancelled or no-show reservation
@@ -289,6 +294,41 @@ timezone and `checkOutTime`, checked-in reservations are persisted as
 `checked_out` once that local checkout time has passed on or after their
 checkout date. Hotels without valid checkout settings are skipped until
 configured; the scheduler reports them in the backend logs.
+
+The homepage can list active properties with:
+
+```http
+GET /api/public/hotels
+```
+
+The response is `{ "hotels": [{ "name": "...", "slug": "..." }] }`; inactive
+hotels are omitted. Use a returned slug for the public hotel lookup and booking
+URLs.
+
+Public hotel lookup:
+
+```http
+GET /api/public/hotels/grand-harbor
+```
+
+Returns `{ "hotel": { "name", "slug", "phone", "address", "type", "settings" } }`
+for active hotels only. The public response omits internal hotel identifiers,
+account email, and hotel status.
+
+Public availability search:
+
+```http
+GET /api/public/hotels/grand-harbor/availability?checkIn=2027-06-10&checkOut=2027-06-12&adults=2&children=0
+```
+
+The server resolves the active hotel from the slug and scopes its room-type,
+room, and reservation queries to that hotel. The response includes the hotel,
+requested stay and guest counts, plus `roomTypes` with capacity, guest-facing
+details, `availableRoomCount`, and pricing (`rateMinorPerNight`,
+`subtotalMinor`, `feesMinor`, `fees`, `totalMinor`, and `currency`). Room types
+without availability or capacity for the requested party are omitted. This is
+a point-in-time check; reservation creation rechecks inventory and calculates
+the price again.
 
 Public booking request:
 
@@ -305,6 +345,10 @@ Public booking request:
   "children": 0
 }
 ```
+
+The request rejects extra fields, including `hotelId`, physical room IDs, and
+client-supplied prices. The hotel is resolved from `hotelSlug`; the server
+assigns an available room and calculates the final price.
 
 `POST /api/public/reservations` returns `201` with
 `{ "reservation": { "id", "reference", "guest", "checkIn", "checkOut",
@@ -349,7 +393,14 @@ Example response:
 `POST /api/public/reservations/lookup` accepts
 `{ "reference": "HTL-...", "email": "alex@example.com" }`. Both values must
 match; an unknown reference or mismatched email returns
-`404 reservation_not_found`. Both public endpoints are rate-limited.
+`404 reservation_not_found`.
+
+To recover reference numbers, `POST /api/public/reservations/reference-email`
+accepts `{ "email": "alex@example.com" }`. The API emails references for
+upcoming confirmed reservations associated with that address. It always
+returns the same `202` response whether or not a match exists, and is
+rate-limited by both IP address and email. If email delivery fails, the API
+returns `503 email_delivery_unavailable`.
 
 Managers can use `GET /api/hotels/{hotelId}/reservations?page=1&limit=25` with
 optional `search`, `status`, `checkInFrom`, and `checkInTo` filters. Responses

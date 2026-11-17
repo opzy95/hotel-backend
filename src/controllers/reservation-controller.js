@@ -1,6 +1,9 @@
 const reservationService = require("../services/reservation-service");
 const {
   adminReservationSchema,
+  emailOnlySchema,
+  publicAvailabilitySchema,
+  publicHotelSlugSchema,
   publicReservationSchema,
   reservationAvailabilitySchema,
   reservationExtensionSchema,
@@ -62,6 +65,26 @@ async function lookupPublicReservation(req, res) {
   return res.json(result);
 }
 
+async function requestUpcomingReservationReferences(req, res) {
+  const parsed = emailOnlySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "validation_error",
+      details: validationDetails(parsed.error.issues),
+    });
+  }
+  const result = await reservationService.sendUpcomingReservationReferences(
+    parsed.data.email,
+    req.app.locals.sendUpcomingReservationReferencesEmail,
+  );
+  if (result.error === "email_delivery_unavailable") {
+    return res.status(503).json({ error: result.error });
+  }
+  return res.status(202).json({
+    message: "If upcoming reservations match that email, the reference details will be sent.",
+  });
+}
+
 async function listReservations(req, res) {
   const parsed = reservationListSchema.safeParse(req.query);
   if (!parsed.success) {
@@ -82,6 +105,28 @@ async function getAvailability(req, res) {
     });
   }
   const result = await reservationService.getAvailability(req.params.hotelId, parsed.data);
+  if (result.error) {
+    return sendServiceError(res, result.error);
+  }
+  return res.json(result);
+}
+
+async function getPublicAvailability(req, res) {
+  const parsedSlug = publicHotelSlugSchema.safeParse(req.params.hotelSlug);
+  if (!parsedSlug.success) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  const parsedQuery = publicAvailabilitySchema.safeParse(req.query);
+  if (!parsedQuery.success) {
+    return res.status(400).json({
+      error: "invalid_query",
+      details: validationDetails(parsedQuery.error.issues),
+    });
+  }
+  const result = await reservationService.getPublicAvailability(
+    parsedSlug.data,
+    parsedQuery.data,
+  );
   if (result.error) {
     return sendServiceError(res, result.error);
   }
@@ -239,9 +284,11 @@ module.exports = {
   createWalkInReservation,
   extendReservation,
   getAvailability,
+  getPublicAvailability,
   listPayments,
   listReservations,
   lookupPublicReservation,
   recordPayment,
+  requestUpcomingReservationReferences,
   updateReservation,
 };

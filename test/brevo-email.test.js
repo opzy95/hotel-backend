@@ -4,6 +4,7 @@ const {
   sendBrevoEmail,
   sendPasswordResetEmail,
   sendStaffInvitationEmail,
+  sendUpcomingReservationReferencesEmail,
   sendVerificationEmail,
 } = require("../src/services/brevo-email");
 
@@ -97,6 +98,26 @@ test("staff invitation email contains a set-password link but no password", asyn
   assert.equal(link.searchParams.get("hotelId"), "hotel-id");
   assert.match(message.textContent, /set your password/);
   assert.doesNotMatch(message.textContent, /password\s*[:=]/i);
+});
+
+test("upcoming-reservation email includes references and escapes hotel names", async () => {
+  configureEmail();
+  let message;
+  globalThis.fetch = async (_url, options) => {
+    message = JSON.parse(options.body);
+    return { ok: true, status: 201 };
+  };
+
+  await sendUpcomingReservationReferencesEmail("guest@example.com", [{
+    hotelName: "<Hotel & Co>",
+    reference: "HTL-0123456789ABCDEF",
+    checkIn: "2030-04-05",
+  }]);
+
+  assert.equal(message.to[0].email, "guest@example.com");
+  assert.match(message.textContent, /HTL-0123456789ABCDEF/);
+  assert.match(message.htmlContent, /&lt;Hotel &amp; Co&gt;/);
+  assert.match(message.htmlContent, /2030-04-05/);
 });
 
 test("Brevo API errors are surfaced to the caller", async () => {

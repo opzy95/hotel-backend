@@ -2,6 +2,7 @@ const hotelService = require("../services/hotel-service");
 const {
   hotelSchema,
   planSelectionSchema,
+  publicHotelSlugSchema,
   settingsSchema,
 } = require("../schemas");
 const { publicHotel } = require("../utils/public-resources");
@@ -15,6 +16,22 @@ function validationDetails(issues) {
 
 async function publicPlans(_req, res) {
   return res.json(await hotelService.getPublicPlans());
+}
+
+async function publicHotels(_req, res) {
+  return res.json({ hotels: await hotelService.listPublicHotels() });
+}
+
+async function publicHotelBySlug(req, res) {
+  const parsed = publicHotelSlugSchema.safeParse(req.params.hotelSlug);
+  if (!parsed.success) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  const hotel = await hotelService.getPublicHotelBySlug(parsed.data);
+  if (!hotel) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  return res.json({ hotel });
 }
 
 async function createHotel(req, res) {
@@ -81,6 +98,8 @@ async function updateSettings(req, res) {
 module.exports = {
   createHotel,
   onboarding,
+  publicHotelBySlug,
+  publicHotels,
   publicPlans,
   selectSubscriptionPlan,
   updateSettings,

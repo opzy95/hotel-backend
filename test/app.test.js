@@ -126,11 +126,57 @@ test("public reservation rejects impossible stay dates before database access", 
   assert.equal((await response.json()).error, "validation_error");
 });
 
+test("public reservation rejects client-supplied hotel, room, and price fields", async () => {
+  const response = await fetch(`${baseUrl}/api/public/reservations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      hotelSlug: "sample-hotel",
+      guestName: "Guest Example",
+      guestEmail: "guest@example.com",
+      guestPhone: "+10000000000",
+      checkIn: "2027-06-10",
+      checkOut: "2027-06-12",
+      roomTypeId: "0123456789abcdef01234567",
+      adults: 1,
+      hotelId: "0123456789abcdef01234567",
+      roomId: "0123456789abcdef01234568",
+      totalMinor: 1,
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "validation_error");
+});
+
+test("public hotel lookup rejects malformed slugs without database access", async () => {
+  const response = await fetch(`${baseUrl}/api/public/hotels/x`);
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error, "hotel_not_found");
+});
+
+test("public availability validates stay dates before database access", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/public/hotels/sample-hotel/availability?checkIn=2026-03-02&checkOut=2026-03-02&adults=1`,
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "invalid_query");
+});
+
 test("public reservation lookup requires a valid reference and email", async () => {
   const response = await fetch(`${baseUrl}/api/public/reservations/lookup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ reference: "short", email: "not-an-email" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "validation_error");
+});
+
+test("public reference recovery validates email before querying reservations", async () => {
+  const response = await fetch(`${baseUrl}/api/public/reservations/reference-email`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "not-an-email" }),
   });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "validation_error");
