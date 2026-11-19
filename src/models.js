@@ -332,6 +332,10 @@ const subscriptionPaymentSchema = new Schema({
   verifiedAt: Date,
   metadata: { type: Schema.Types.Mixed, default: {} },
 }, { timestamps: true });
+subscriptionPaymentSchema.index(
+  { subscriptionId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "pending" } },
+);
 
 const auditLogSchema = new Schema({
   actorUserId: { type: Schema.Types.ObjectId, ref: "User", required: true },

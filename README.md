@@ -659,14 +659,17 @@ the end date is 60 days after selection. When a manager accesses the hotel
 after the end date, the subscription is marked `expired`. Expired hotels can
 still access onboarding and subscription selection, but settings changes are
 blocked as read-only. Expiry is applied when a hotel-scoped request is made,
-not by a background scheduler. Paid plan selection remains `pending` until
-payment verification is implemented. The public catalog contains `STANDARD`
+not by a background scheduler. The public catalog contains `STANDARD`
 (six months, NGN 150,000) and `PROFESSIONAL` (twelve months, NGN 270,000) as
-separate paid plans. Plan entries include their database `id`, which is used
-when selecting a plan. `PUT /api/hotels/{hotelId}/subscription` accepts either
-`{ "planId": "<plan id>" }` or `{ "planCode": "STANDARD" }`; for compatibility,
-the plan code may also be sent as `planId`. The seed deactivates the previous
-six-month `PROFESSIONAL` price rather than deleting its record. Hotels remain
+separate paid plans. These prices are stored in minor units (kobo) as
+15,000,000 and 27,000,000. Plan entries include their database `id`, which is
+used when selecting a plan. `PUT /api/hotels/{hotelId}/subscription` accepts
+either `{ "planId": "<plan id>" }` or `{ "planCode": "STANDARD" }`; include
+`billingInterval` (`6_months` or `12_months`) when a plan has multiple active
+prices. For compatibility, the plan code may also be sent as `planId`. Run
+`npm run seed:plans` after deployment to synchronize the default catalog
+prices. The seed deactivates the previous six-month `PROFESSIONAL` price rather
+than deleting its record. Hotels remain
 `pending_approval` until the manager verifies their email, at which point they
 become `active`. Platform operators can then switch hotels between `active`
 and `suspended` through `PATCH /api/platform/hotels/{hotelId}/status`.
@@ -674,15 +677,26 @@ Suspended hotels are blocked from tenant-scoped operations until an operator
 reactivates them. Existing `approved` hotel statuses are migrated to `active`
 when the backend starts.
 
-## Not included in this first slice
+For paid plans, select the plan first, then initialize hosted checkout with
+`POST /api/hotels/{hotelId}/subscription/payments/initialize`. It returns a
+Paystack authorization URL and reference. After Paystack redirects the browser
+to `PAYSTACK_CALLBACK_URL` (or `FRONTEND_URL` when unset), the frontend must
+send `{ "reference": "<reference>" }` to
+`POST /api/hotels/{hotelId}/subscription/payments/verify`. The backend verifies
+the transaction directly with Paystack and checks its reference, amount, and
+currency before activating the subscription. A browser redirect or uploaded
+receipt alone never marks a platform subscription as paid. Keep
+`PAYSTACK_SECRET_KEY` server-side; the hosted checkout flow does not require
+the public key. Configure `PAYSTACK_CALLBACK_URL` to a frontend route that
+reads the `reference` query parameter and calls the verification endpoint.
+This flow is only for platform subscriptions; reservation payments are
+unchanged. Paystack webhooks are not configured in this integration.
 
-Payment-provider checkout/webhooks, dynamic or seasonal room pricing, booking
-confirmation emails, staff invitations/email delivery, custom hotel domains,
-and audit-log browsing are not implemented yet. Do not treat
-`pending` as proof that a subscription payment succeeded. Paid plans without a
-trial cannot be activated until payment processing is integrated. The hotel
-registration address requires a two-letter country code; currency uses a
-three-letter ISO code and prices are integer minor units.
+Dynamic or seasonal room pricing, booking confirmation emails, staff
+invitations/email delivery, custom hotel domains, and audit-log browsing are
+not implemented yet. The hotel registration address requires a two-letter
+country code; currency uses a three-letter ISO code and prices are integer
+minor units.
 
 Before production signup, configure and test Brevo delivery and abuse
 protections. Use HTTPS for the production `FRONTEND_URL`. Plan availability

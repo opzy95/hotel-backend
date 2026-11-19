@@ -15,6 +15,7 @@ const {
   sendVerificationEmail,
 } = require("./src/services/brevo-email");
 const cloudinaryStorage = require("./src/services/cloudinary-storage");
+const { paystackClient } = require("./src/services/paystack-client");
 const routes = require("./src/routes");
 const { ensurePublicPlans } = require("./src/services/plan-seed");
 
@@ -43,6 +44,7 @@ function createApp() {
   app.locals.sendUpcomingReservationReferencesEmail = sendUpcomingReservationReferencesEmail;
   app.locals.roomPhotoStorage = cloudinaryStorage;
   app.locals.receiptStorage = cloudinaryStorage;
+  app.locals.subscriptionPaymentGateway = paystackClient;
   app.use(routes);
 
   app.use((err, _req, res, _next) => {
@@ -62,6 +64,12 @@ function createApp() {
     }
     if (err?.name === "CloudStorageConfigurationError" || err?.name === "CloudStorageError") {
       return res.status(503).json({ error: "cloud_storage_unavailable" });
+    }
+    if (err?.name === "PaystackConfigurationError") {
+      return res.status(503).json({ error: "payment_gateway_unavailable" });
+    }
+    if (err?.name === "PaystackRequestError") {
+      return res.status(502).json({ error: "payment_gateway_request_failed" });
     }
     if (err?.code === 11000) {
       return res.status(409).json({ error: "resource_already_exists" });

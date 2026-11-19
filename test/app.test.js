@@ -224,6 +224,26 @@ test("hotel settings endpoint requires authentication", async () => {
   assert.equal((await response.json()).error, "authentication_required");
 });
 
+test("platform subscription payment endpoints require authentication", async () => {
+  const initializeResponse = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/subscription/payments/initialize`,
+    { method: "POST" },
+  );
+  assert.equal(initializeResponse.status, 401);
+  assert.equal((await initializeResponse.json()).error, "authentication_required");
+
+  const verifyResponse = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/subscription/payments/verify`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reference: "SUB-test-reference" }),
+    },
+  );
+  assert.equal(verifyResponse.status, 401);
+  assert.equal((await verifyResponse.json()).error, "authentication_required");
+});
+
 test("public reservation rejects impossible stay dates before database access", async () => {
   const response = await fetch(`${baseUrl}/api/public/reservations`, {
     method: "POST",

@@ -1,10 +1,12 @@
 const hotelService = require("../services/hotel-service");
+const subscriptionPaymentService = require("../services/subscription-payment-service");
 const {
   hotelSchema,
   bankDetailsSchema,
   planSelectionSchema,
   publicHotelSlugSchema,
   settingsSchema,
+  subscriptionPaymentVerificationSchema,
 } = require("../schemas");
 const { publicHotel } = require("../utils/public-resources");
 
@@ -76,6 +78,7 @@ async function selectSubscriptionPlan(req, res) {
     req.params.hotelId,
     parsed.data.planId || parsed.data.planCode,
     req.user._id,
+    parsed.data.billingInterval,
   );
   if (result.error === "plan_not_found") {
     return res.status(404).json({ error: result.error });
@@ -88,6 +91,59 @@ async function selectSubscriptionPlan(req, res) {
   }
   if (result.error === "subscription_selection_locked") {
     return res.status(409).json({ error: result.error });
+  }
+  if (result.error === "billing_interval_required") {
+    return res.status(400).json({ error: result.error });
+  }
+  if (result.error === "plan_price_unavailable") {
+    return res.status(409).json({ error: result.error });
+  }
+  return res.json(result);
+}
+
+function subscriptionPaymentError(res, result) {
+  const status = {
+    billing_interval_required: 409,
+    payment_details_mismatch: 409,
+    payment_initialization_in_progress: 409,
+    payment_not_found: 404,
+    payment_not_pending: 409,
+    payment_not_successful: 409,
+    plan_price_unavailable: 409,
+    subscription_interval_invalid: 409,
+    subscription_not_found: 404,
+    subscription_not_payable: 409,
+  }[result.error] || 400;
+  return res.status(status).json({
+    error: result.error,
+    ...(result.paymentStatus ? { paymentStatus: result.paymentStatus } : {}),
+  });
+}
+
+async function initializeSubscriptionPayment(req, res) {
+  const result = await subscriptionPaymentService.initializeSubscriptionPayment(
+    req.params.hotelId,
+    req.user,
+    req.app.locals.subscriptionPaymentGateway,
+  );
+  if (result.error) {
+    return subscriptionPaymentError(res, result);
+  }
+  return res.json(result);
+}
+
+async function verifySubscriptionPayment(req, res) {
+  const parsed = subscriptionPaymentVerificationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_payment_reference" });
+  }
+  const result = await subscriptionPaymentService.verifySubscriptionPayment(
+    req.params.hotelId,
+    parsed.data.reference,
+    req.app.locals.subscriptionPaymentGateway,
+  );
+  if (result.error) {
+    return subscriptionPaymentError(res, result);
   }
   return res.json(result);
 }
@@ -119,11 +175,13 @@ async function updateBankDetails(req, res) {
 module.exports = {
   createHotel,
   getSettings,
+  initializeSubscriptionPayment,
   onboarding,
   publicHotelBySlug,
   publicHotels,
   publicPlans,
   selectSubscriptionPlan,
+  verifySubscriptionPayment,
   updateBankDetails,
   updateSettings,
 };

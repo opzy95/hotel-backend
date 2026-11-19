@@ -149,10 +149,15 @@ const planIdentifierSchema = z.string()
 const planSelectionSchema = z.object({
   planId: planIdentifierSchema.optional(),
   planCode: planIdentifierSchema.optional(),
+  billingInterval: z.enum(["6_months", "12_months"]).optional(),
 }).refine(
   (selection) => Boolean(selection.planId) !== Boolean(selection.planCode),
   { message: "Provide exactly one of planId or planCode" },
 );
+
+const subscriptionPaymentVerificationSchema = z.object({
+  reference: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/),
+});
 
 const hotelStatusSchema = z.object({
   status: z.enum(["active", "suspended"]),
@@ -399,5 +404,6 @@ module.exports = {
   settingsSchema,
   staffMemberSchema,
   staffMemberUpdateSchema,
+  subscriptionPaymentVerificationSchema,
   verificationCodeSchema,
 };

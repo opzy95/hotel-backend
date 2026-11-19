@@ -116,7 +116,9 @@ async function getOnboarding(hotelId) {
   await expireSubscriptions(hotelId);
   const [hotel, subscription] = await Promise.all([
     Hotel.findById(hotelId).select("status setupCompletedSteps"),
-    Subscription.findOne({ hotelId }).populate("planId", "name code"),
+    Subscription.findOne({ hotelId })
+      .populate("planId", "name code")
+      .populate("planPriceId", "billingInterval amountMinor currency"),
   ]);
   if (!hotel) {
     return null;
@@ -134,6 +136,7 @@ async function getOnboarding(hotelId) {
     subscription: subscription ? {
       status: subscription.status,
       plan: subscription.planId,
+      planPrice: subscription.planPriceId,
       trial_start_date: subscription.trial_start_date,
       trial_end_date: subscription.trial_end_date,
       expires_at: subscription.expires_at,
@@ -147,7 +150,7 @@ async function getSettings(hotelId) {
     .lean();
 }
 
-async function selectSubscriptionPlan(hotelId, planId, userId) {
+async function selectSubscriptionPlan(hotelId, planId, userId, billingInterval) {
   await expireSubscriptions(hotelId);
   const planFilter = mongoose.isValidObjectId(planId)
     ? { _id: planId, active: true }
@@ -165,6 +168,28 @@ async function selectSubscriptionPlan(hotelId, planId, userId) {
     return { error: "email_not_verified" };
   }
 
+  let planPrice = null;
+  if (!isTrial) {
+    const activePrices = await PlanPrice.find({ planId: plan._id, active: true })
+      .sort({ billingInterval: 1 })
+      .lean();
+    if (billingInterval) {
+      planPrice = activePrices.find((price) => price.billingInterval === billingInterval);
+    } else if (activePrices.length === 1) {
+      [planPrice] = activePrices;
+    } else if (activePrices.length > 1) {
+      return { error: "billing_interval_required" };
+    }
+    if (
+      !planPrice
+      || !Number.isSafeInteger(planPrice.amountMinor)
+      || planPrice.amountMinor <= 0
+      || !/^[A-Z]{3}$/.test(planPrice.currency)
+    ) {
+      return { error: "plan_price_unavailable" };
+    }
+  }
+
   const selectedAt = new Date();
   const trialEndDate = isTrial
     ? new Date(selectedAt.getTime() + plan.trialDays * 24 * 60 * 60 * 1000)
@@ -176,24 +201,43 @@ async function selectSubscriptionPlan(hotelId, planId, userId) {
       name: plan.name,
       description: plan.description,
       planType: plan.planType,
-      amountMinor: plan.amountMinor,
-      currency: plan.currency,
+      ...(planPrice ? {
+        amountMinor: planPrice.amountMinor,
+        currency: planPrice.currency,
+        billingInterval: planPrice.billingInterval,
+      } : {
+        amountMinor: plan.amountMinor,
+        currency: plan.currency,
+      }),
     },
     selected_at: selectedAt,
     status: isTrial ? "trialing" : "pending",
   };
+  if (!isTrial) {
+    setFields.planPriceId = planPrice._id;
+    setFields.billing_interval = planPrice.billingInterval;
+  }
   if (isTrial) {
     setFields.trial_start_date = selectedAt;
     setFields.trial_end_date = trialEndDate;
     setFields.trial_used_at = selectedAt;
   }
 
-  const subscriptionFilter = {
-    hotelId,
-    status: isTrial
-      ? "pending_selection"
-      : { $in: ["pending_selection", "expired"] },
-  };
+  const subscriptionFilter = { hotelId };
+  if (isTrial) {
+    subscriptionFilter.status = "pending_selection";
+  } else {
+    subscriptionFilter.$or = [
+      { status: { $in: ["pending_selection", "expired"] } },
+      {
+        status: "pending",
+        $or: [
+          { planPriceId: null },
+          { planPriceId: { $exists: false } },
+        ],
+      },
+    ];
+  }
   if (isTrial) {
     subscriptionFilter.$or = [
       { trial_used_at: { $exists: false } },
@@ -220,6 +264,11 @@ async function selectSubscriptionPlan(hotelId, planId, userId) {
     subscription: {
       status: subscription.status,
       plan: subscription.planId,
+      planPrice: planPrice ? {
+        billingInterval: planPrice.billingInterval,
+        amountMinor: planPrice.amountMinor,
+        currency: planPrice.currency,
+      } : null,
       planSnapshot: subscription.planSnapshot,
       trial_start_date: subscription.trial_start_date,
       trial_end_date: subscription.trial_end_date,

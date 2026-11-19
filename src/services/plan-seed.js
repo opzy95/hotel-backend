@@ -97,14 +97,14 @@ const DEFAULT_PLAN_PRICES = [
   {
     planCode: "STANDARD",
     billingInterval: "6_months",
-    amountMinor: 150000,
+    amountMinor: 15000000,
     currency: "NGN",
     active: true,
   },
   {
     planCode: "PROFESSIONAL",
     billingInterval: "12_months",
-    amountMinor: 270000,
+    amountMinor: 27000000,
     currency: "NGN",
     active: true,
   },

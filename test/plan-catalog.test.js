@@ -28,13 +28,13 @@ test("default catalog separates Standard six-month and Professional yearly plans
       {
         planCode: "STANDARD",
         billingInterval: "6_months",
-        amountMinor: 150000,
+        amountMinor: 15000000,
         currency: "NGN",
       },
       {
         planCode: "PROFESSIONAL",
         billingInterval: "12_months",
-        amountMinor: 270000,
+        amountMinor: 27000000,
         currency: "NGN",
       },
     ],
@@ -53,6 +53,20 @@ test("plan selection accepts either a Mongo ID or a plan code", () => {
   assert.equal(
     planSelectionSchema.safeParse({ planCode: "STANDARD" }).success,
     true,
+  );
+  assert.equal(
+    planSelectionSchema.safeParse({
+      planCode: "STANDARD",
+      billingInterval: "6_months",
+    }).success,
+    true,
+  );
+  assert.equal(
+    planSelectionSchema.safeParse({
+      planCode: "STANDARD",
+      billingInterval: "monthly",
+    }).success,
+    false,
   );
   assert.equal(planSelectionSchema.safeParse({}).success, false);
   assert.equal(

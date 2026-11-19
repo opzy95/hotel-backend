@@ -160,6 +160,18 @@ router.put(
   requireManager,
   hotelController.selectSubscriptionPlan,
 );
+router.post(
+  "/api/hotels/:hotelId/subscription/payments/initialize",
+  authenticate,
+  requireManager,
+  hotelController.initializeSubscriptionPayment,
+);
+router.post(
+  "/api/hotels/:hotelId/subscription/payments/verify",
+  authenticate,
+  requireManager,
+  hotelController.verifySubscriptionPayment,
+);
 router.get(
   "/api/hotels/:hotelId/settings",
   authenticate,
