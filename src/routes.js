@@ -7,6 +7,7 @@ const platformController = require("./controllers/platform-controller");
 const reservationController = require("./controllers/reservation-controller");
 const roomController = require("./controllers/room-controller");
 const staffController = require("./controllers/staff-controller");
+const { parseReceiptUpload } = require("./middleware/receipt-upload");
 const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
   authenticate,
@@ -115,6 +116,7 @@ router.get(
 router.post(
   "/api/public/reservations",
   publicReservationLimiter,
+  parseReceiptUpload,
   reservationController.createPublicReservation,
 );
 router.post(
@@ -158,12 +160,24 @@ router.put(
   requireManager,
   hotelController.selectSubscriptionPlan,
 );
+router.get(
+  "/api/hotels/:hotelId/settings",
+  authenticate,
+  requireManager,
+  hotelController.getSettings,
+);
 router.patch(
   "/api/hotels/:hotelId/settings",
   authenticate,
   requireManager,
   requireSubscriptionWriteAccess,
   hotelController.updateSettings,
+);
+router.put(
+  "/api/hotels/:hotelId/bank-details",
+  authenticate,
+  requireManager,
+  hotelController.updateBankDetails,
 );
 
 router.get(

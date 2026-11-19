@@ -57,9 +57,9 @@ expiry, issuer, and audience checks.
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
 | `GET` | `/api/public/hotels` | Public, rate-limited | List active hotels by name and slug |
-| `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details |
+| `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details, including bank details when configured |
 | `GET` | `/api/public/hotels/{hotelSlug}/availability` | Public, rate-limited | Search available room types and server-calculated pricing for dates and guest counts |
-| `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant, Manager membership, and pending subscription |
+| `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant (optional `bankDetails`), Manager membership, and pending subscription |
 | `POST` | `/api/auth/accept-invitation` | Public, rate-limited | Accept a single-use hotel staff invitation and set a password |
 | `POST` | `/api/auth/login` | Public, rate-limited | Sign in; configured frontend origin also receives an HttpOnly refresh cookie |
 | `POST` | `/api/auth/refresh` | Configured frontend origin | Rotate refresh cookie and issue a new access token |
@@ -73,7 +73,9 @@ expiry, issuer, and audience checks.
 | `POST` | `/api/hotels` | Authenticated | Create another hotel with the caller as its first Manager |
 | `GET` | `/api/hotels/{hotelId}/onboarding` | Hotel Manager | Read hotel status, plan, and setup progress |
 | `PUT` | `/api/hotels/{hotelId}/subscription` | Hotel Manager | Select an active plan |
-| `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update initial hotel settings |
+| `GET` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Read hotel details, operational settings, and bank details |
+| `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update timezone, locale, currency, and check-in/out times |
+| `PUT` | `/api/hotels/{hotelId}/bank-details` | Hotel Manager | Set or replace bank details for public booking |
 | `GET` | `/api/hotels/{hotelId}/room-types` | Manager, or receptionist with `rooms.availability.view` | List active room types; only managers can include inactive types |
 | `POST` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | Create a room type |
 | `PATCH` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Update room type details |
@@ -98,7 +100,7 @@ expiry, issuer, and audience checks.
 | `POST` | `/api/hotels/{hotelId}/staff` | Hotel Manager | Add staff to a department belonging to the hotel |
 | `PATCH` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Update staff details; updates may be partial |
 | `DELETE` | `/api/hotels/{hotelId}/staff/{staffId}` | Hotel Manager | Delete a staff record; also revoke associated receptionist access and pending invitations |
-| `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug |
+| `POST` | `/api/public/reservations` | Public, rate-limited | Create a guest reservation using the hotel's slug; optional receipt upload |
 | `POST` | `/api/public/reservations/lookup` | Public, rate-limited | Retrieve a reservation with its reference and guest email |
 | `POST` | `/api/public/reservations/reference-email` | Public, rate-limited | Email references for upcoming reservations matching a guest email |
 | `GET` | `/api/hotels/{hotelId}/reservations` | Manager or receptionist with `reservations.view` | List reservations with pagination and optional search/status/check-in-date filters |
@@ -107,7 +109,7 @@ expiry, issuer, and audience checks.
 | `GET` | `/api/hotels/{hotelId}/reservations/availability` | Manager or receptionist with `rooms.availability.view` | Check available rooms and server-calculated pricing for a stay and room type |
 | `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/check-in` | Manager or receptionist with `reservations.check_in` | Check in a reservation |
 | `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/check-out` | Manager or receptionist with `reservations.check_out` | Check out a reservation |
-| `GET` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Manager, or receptionist with `payments.walk_in.create` | List payments and current summary for a reservation |
+| `GET` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Manager, or receptionist with `payments.walk_in.create` | List payments, current summary, and any public-booking receipt |
 | `POST` | `/api/hotels/{hotelId}/reservations/{reservationId}/payments` | Manager, or receptionist with `payments.walk_in.create` | Record a full or partial payment for any reservation, including walk-ins |
 | `PATCH` | `/api/hotels/{hotelId}/reservations/{reservationId}` | Hotel Manager | Update guest, stay, room assignment, or reservation status |
 | `GET` | `/api/platform/hotels` | Platform operator | List hotels with manager, subscription, plan, and subscription payment details |
@@ -285,7 +287,8 @@ zero additional fees (`feesMinor: 0`, `fees: []`); no taxes, discounts, or
 payment-provider processing is applied. New reservations are `confirmed`; a
 nonzero total starts as `unpaid`, while a zero total is immediately settled.
 Reservation payment status is derived from recorded amounts: `unpaid`,
-`partially_paid`, or `paid`. Reservation statuses are `confirmed`, `cancelled`,
+`pending_verification` (a public receipt was uploaded but payment is not
+recorded), `partially_paid`, or `paid`. Reservation statuses are `confirmed`, `cancelled`,
 `checked_in`, `checked_out`, and `no_show`. A cancelled or no-show reservation
 can be confirmed again only if the room remains available; checked-in
 reservations can only be checked out.
@@ -311,9 +314,22 @@ Public hotel lookup:
 GET /api/public/hotels/grand-harbor
 ```
 
-Returns `{ "hotel": { "name", "slug", "phone", "address", "type", "settings" } }`
+Returns `{ "hotel": { "name", "slug", "phone", "address", "type", "settings", "bankDetails" } }`
 for active hotels only. The public response omits internal hotel identifiers,
 account email, and hotel status.
+
+Registration may include a `bankDetails` object under `hotel` with
+`bankName`, `bankAccountNumber`, and `accountName`. Managers can later set or
+replace the complete object with `PUT /api/hotels/{hotelId}/bank-details` and
+the same three fields. The public hotel lookup returns `bankDetails` as `null`
+until configured; when present, guests can use it for bank-transfer payments.
+
+The manager-only `GET /api/hotels/{hotelId}/settings` returns the hotel profile
+(`id`, `name`, `email`, `phone`, `address`, `type`, `roomCount`, `slug`, and
+`status`) together with `settings` and `bankDetails`. Update operational
+settings with `PATCH /api/hotels/{hotelId}/settings`; update the bank account
+with `PUT /api/hotels/{hotelId}/bank-details`. Hotel identity and profile
+fields are read-only through these settings routes.
 
 Public availability search:
 
@@ -358,6 +374,32 @@ characters. The server returns `400 validation_error` for invalid input,
 `404 hotel_not_found` or `404 room_type_not_found` for unknown resources, and
 `409 room_unavailable` or `409 room_guest_limit_exceeded` when inventory or
 capacity constraints fail.
+
+The public booking endpoint also accepts `multipart/form-data` with the same
+fields (numeric `adults` and `children` are sent as strings) and an optional
+`receipt` file. Receipts may be PDF, AVIF, JPEG, PNG, or WebP up to 5 MB.
+Receipt upload is available only through this public booking route; admin and
+walk-in reservation routes do not accept receipts. Uploading a receipt sets
+`paymentStatus` to `pending_verification`, not `paid`; payment remains pending
+until a manager or authorized receptionist records the received transfer.
+Bookings without a receipt retain the normal `unpaid`/`paid` behavior.
+
+For browser clients, append the normal booking fields and the optional file to
+`FormData`; do not set the multipart `Content-Type` header manually:
+
+```js
+const form = new FormData();
+form.append("hotelSlug", hotelSlug);
+form.append("guestName", guestName);
+form.append("guestEmail", guestEmail);
+form.append("guestPhone", guestPhone);
+form.append("checkIn", checkIn);
+form.append("checkOut", checkOut);
+form.append("roomTypeId", roomTypeId);
+form.append("adults", String(adults));
+form.append("children", String(children));
+form.append("receipt", receiptFile);
+```
 
 Example response:
 
@@ -408,6 +450,10 @@ contain `reservations` and `{ "page", "limit", "total", "pages" }` pagination.
 Admin reservation objects include `guest.id`, `guest.country`,
 `guest.membershipTier`, and `guest.createdAt` alongside guest name, email, and
 phone. Guest profiles are hotel-scoped and matched by normalized email.
+Managers can view a public-booking `paymentReceipt` in reservation details.
+Receptionists see the receipt only if they have `payments.walk_in.create` or
+`payments.create`; the payment-details endpoint also includes it for authorized
+staff. Receipt metadata includes a view URL, format, size, and upload time.
 Country and membership tier are `null` until provided; the backend does not
 infer them. Existing reservations are linked to profiles during startup
 backfill; those profile creation timestamps indicate when the profile was
@@ -527,7 +573,10 @@ The payment response contains `payment` with `id`, `amountMinor`, `currency`,
 ```
 
 `GET /api/hotels/{hotelId}/reservations/{reservationId}/payments` returns
-`{ "payments": [...], "paymentSummary": { ... } }`. Admin reservation objects
+`{ "payments": [...], "paymentSummary": { ... }, "paymentReceipt": { ... } }`
+when the reservation is a public booking with an uploaded receipt. Authorized
+managers and receptionists with `payments.walk_in.create` or `payments.create`
+can view its URL, file format, size, and upload time. Admin reservation objects
 also include `paymentSummary`. Payment records are append-only; payment
 reversals/refunds and gateway processing are not implemented. Manager
 reservation and payment administration requires an active manager membership;

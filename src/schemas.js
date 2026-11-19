@@ -4,6 +4,12 @@ const {
   RECEPTIONIST_PERMISSIONS,
 } = require("./utils/hotel-permissions");
 
+const bankDetailsSchema = z.object({
+  bankName: z.string().trim().min(1).max(120),
+  bankAccountNumber: z.string().trim().min(1).max(40),
+  accountName: z.string().trim().min(1).max(120),
+});
+
 const hotelSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254),
@@ -16,6 +22,7 @@ const hotelSchema = z.object({
     postalCode: z.string().trim().max(20).optional().default(""),
     country: z.string().trim().regex(/^[A-Za-z]{2}$/),
   }),
+  bankDetails: bankDetailsSchema.optional(),
   type: z.string().trim().min(2).max(60),
   roomCount: z.number().int().min(0).max(100000),
 });
@@ -357,6 +364,7 @@ module.exports = {
   actionTokenSchema,
   acceptHotelInvitationSchema,
   bedSetupItemSchema,
+  bankDetailsSchema,
   departmentSchema,
   emailOnlySchema,
   guestCreateSchema,

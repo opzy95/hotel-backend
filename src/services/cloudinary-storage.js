@@ -52,6 +52,37 @@ function uploadImage(buffer) {
   });
 }
 
+function uploadReceipt(file) {
+  const client = configuredCloudinary();
+  return new Promise((resolve, reject) => {
+    const stream = client.uploader.upload_stream({
+      folder: "hotel-backend/payment-receipts",
+      resource_type: "auto",
+      allowed_formats: ["avif", "jpg", "jpeg", "png", "webp", "pdf"],
+    }, (error, result) => {
+      if (error) {
+        return reject(error);
+      }
+      if (!result?.public_id || !result.secure_url || !result.resource_type || !result.format) {
+        return reject(new Error("Receipt upload returned incomplete metadata"));
+      }
+      return resolve({
+        publicId: result.public_id,
+        secureUrl: result.secure_url,
+        resourceType: result.resource_type,
+        format: result.format,
+        bytes: result.bytes,
+      });
+    });
+    stream.end(file.buffer);
+  }).catch((error) => {
+    if (error instanceof CloudStorageConfigurationError) {
+      throw error;
+    }
+    throw new CloudStorageError("Receipt upload failed");
+  });
+}
+
 async function uploadImages(files) {
   const uploaded = [];
   try {
@@ -82,6 +113,20 @@ async function deleteImage(publicId) {
   }
 }
 
+async function deleteReceipt(receipt) {
+  try {
+    return await configuredCloudinary().uploader.destroy(receipt.publicId, {
+      invalidate: true,
+      resource_type: receipt.resourceType,
+    });
+  } catch (error) {
+    if (error instanceof CloudStorageConfigurationError) {
+      throw error;
+    }
+    throw new CloudStorageError("Receipt deletion failed");
+  }
+}
+
 async function deleteImages(images) {
   await Promise.all(images.map((image) => deleteImage(image.publicId)));
 }
@@ -91,5 +136,7 @@ module.exports = {
   CloudStorageError,
   deleteImage,
   deleteImages,
+  deleteReceipt,
+  uploadReceipt,
   uploadImages,
 };

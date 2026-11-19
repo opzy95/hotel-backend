@@ -60,7 +60,7 @@ async function createHotel(details, manager) {
 
 async function findActiveHotelBySlug(slug) {
   return Hotel.findOne({ slug, status: "active" })
-    .select("name slug phone address type settings")
+    .select("name slug phone address type settings bankDetails")
     .lean();
 }
 
@@ -139,6 +139,12 @@ async function getOnboarding(hotelId) {
       expires_at: subscription.expires_at,
     } : null,
   };
+}
+
+async function getSettings(hotelId) {
+  return Hotel.findById(hotelId)
+    .select("name email phone address type roomCount slug status settings bankDetails")
+    .lean();
 }
 
 async function selectSubscriptionPlan(hotelId, planId, userId) {
@@ -245,15 +251,25 @@ async function updateSettings(hotelId, settings) {
   return publicHotel(hotel);
 }
 
+async function updateBankDetails(hotelId, bankDetails) {
+  return Hotel.findByIdAndUpdate(
+    hotelId,
+    { $set: { bankDetails } },
+    { returnDocument: "after", runValidators: true },
+  );
+}
+
 module.exports = {
   createHotel,
   createHotelWorkspace,
   findActiveHotelBySlug,
   getPublicHotelBySlug,
   getOnboarding,
+  getSettings,
   listPublicHotels,
   getPublicPlans,
   publicHotel,
   selectSubscriptionPlan,
+  updateBankDetails,
   updateSettings,
 };

@@ -2,6 +2,17 @@ function publicUser(user) {
   return { id: user._id, name: user.name, email: user.email };
 }
 
+function hotelBankDetails(bankDetails) {
+  if (!bankDetails) {
+    return null;
+  }
+  return {
+    bankName: bankDetails.bankName,
+    bankAccountNumber: bankDetails.bankAccountNumber,
+    accountName: bankDetails.accountName,
+  };
+}
+
 function publicHotel(hotel) {
   return {
     id: hotel._id,
@@ -13,7 +24,8 @@ function publicHotel(hotel) {
     roomCount: hotel.roomCount,
     slug: hotel.slug,
     status: hotel.status,
-    settings: hotel.settings,
+    settings: hotel.settings || {},
+    bankDetails: hotelBankDetails(hotel.bankDetails),
   };
 }
 
@@ -33,6 +45,7 @@ function publicHotelDetails(hotel) {
       country: address.country,
     },
     type: hotel.type,
+    bankDetails: hotelBankDetails(hotel.bankDetails),
     settings: {
       timezone: settings.timezone || "UTC",
       locale: settings.locale || null,

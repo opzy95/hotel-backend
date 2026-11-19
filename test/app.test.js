@@ -1,6 +1,9 @@
 const { after, before, test } = require("node:test");
 const assert = require("node:assert/strict");
 const app = require("../app");
+const { bankDetailsSchema, registrationSchema } = require("../src/schemas");
+const { publicHotel, publicHotelDetails } = require("../src/utils/public-resources");
+const { reservationResource } = require("../src/services/reservation-service");
 
 let server;
 let baseUrl;
@@ -38,6 +41,115 @@ test("registration validates input before touching the database", async () => {
   });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "validation_error");
+});
+
+test("bank details require a complete, valid account record", () => {
+  const bankDetails = {
+    bankName: "Example Bank",
+    bankAccountNumber: "0012345678",
+    accountName: "Example Hotel Ltd",
+  };
+  assert.deepEqual(bankDetailsSchema.parse(bankDetails), bankDetails);
+  assert.equal(bankDetailsSchema.safeParse({
+    ...bankDetails,
+    bankAccountNumber: " ",
+  }).success, false);
+  assert.equal(bankDetailsSchema.safeParse({
+    ...bankDetails,
+    accountName: undefined,
+  }).success, false);
+
+  const registration = registrationSchema.safeParse({
+    hotel: {
+      name: "Example Hotel",
+      email: "hotel@example.test",
+      phone: "+10000000000",
+      address: { line1: "1 Test Street", city: "Test", country: "US" },
+      bankDetails,
+      type: "boutique",
+      roomCount: 10,
+    },
+    manager: {
+      name: "Hotel Manager",
+      email: "manager@example.test",
+      password: "unique-test-password-2026",
+    },
+  });
+  assert.equal(registration.success, true);
+});
+
+test("public hotel details expose configured bank information", () => {
+  const bankDetails = {
+    bankName: "Example Bank",
+    bankAccountNumber: "0012345678",
+    accountName: "Example Hotel Ltd",
+  };
+  const hotel = {
+    name: "Example Hotel",
+    slug: "example-hotel",
+    phone: "+10000000000",
+    address: { line1: "1 Test Street", city: "Test", country: "US" },
+    type: "boutique",
+    bankDetails,
+  };
+  assert.deepEqual(publicHotel({ ...hotel, _id: "hotel-id" }).bankDetails, bankDetails);
+  assert.deepEqual(publicHotelDetails(hotel).bankDetails, bankDetails);
+  assert.equal(publicHotelDetails({ ...hotel, bankDetails: undefined }).bankDetails, null);
+});
+
+test("public receipt uploads remain pending until payment is recorded", () => {
+  const reservation = {
+    _id: "reservation-id",
+    hotelId: "hotel-id",
+    reference: "HTL-0123456789ABCDEF",
+    guestName: "Guest Example",
+    guestEmail: "guest@example.test",
+    guestPhone: "+10000000000",
+    checkIn: new Date("2027-06-10T00:00:00.000Z"),
+    checkOut: new Date("2027-06-11T00:00:00.000Z"),
+    roomTypeId: { _id: "room-type-id", name: "Standard" },
+    roomId: { _id: "room-id", code: "101" },
+    adults: 1,
+    children: 0,
+    nights: 1,
+    rateMinorPerNight: 12000,
+    totalMinor: 12000,
+    amountPaidMinor: 0,
+    currency: "USD",
+    paymentStatus: "pending_verification",
+    status: "confirmed",
+    source: "public",
+    paymentReceipt: {
+      secureUrl: "https://example.test/receipt.pdf",
+      format: "pdf",
+      bytes: 42,
+      uploadedAt: new Date("2027-06-01T00:00:00.000Z"),
+    },
+    createdAt: new Date("2027-06-01T00:00:00.000Z"),
+    updatedAt: new Date("2027-06-01T00:00:00.000Z"),
+  };
+  const pending = reservationResource(reservation, { includePaymentSummary: true });
+  assert.equal(pending.paymentStatus, "pending_verification");
+  assert.equal(pending.paymentSummary.balanceDueMinor, 12000);
+  assert.equal(
+    reservationResource(
+      { ...reservation, amountPaidMinor: 3000 },
+      { includePaymentSummary: true },
+    ).paymentStatus,
+    "partially_paid",
+  );
+  assert.equal(reservationResource(reservation).paymentReceipt, undefined);
+  assert.equal(
+    reservationResource(reservation, { includePaymentReceipt: true }).paymentReceipt.url,
+    reservation.paymentReceipt.secureUrl,
+  );
+  assert.equal(
+    reservationResource(
+      { ...reservation, source: "admin" },
+      { includePaymentReceipt: true },
+    ).paymentReceipt,
+    undefined,
+  );
 });
 
 test("malformed JSON receives a client error", async () => {
@@ -106,6 +218,12 @@ test("protected endpoints reject requests without a bearer token", async () => {
   assert.equal((await response.json()).error, "authentication_required");
 });
 
+test("hotel settings endpoint requires authentication", async () => {
+  const response = await fetch(`${baseUrl}/api/hotels/not-an-id/settings`);
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "authentication_required");
+});
+
 test("public reservation rejects impossible stay dates before database access", async () => {
   const response = await fetch(`${baseUrl}/api/public/reservations`, {
     method: "POST",
@@ -146,6 +264,39 @@ test("public reservation rejects client-supplied hotel, room, and price fields",
   });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "validation_error");
+});
+
+test("public reservation rejects unsupported receipt file types", async () => {
+  const form = new FormData();
+  form.append("receipt", new Blob(["not a receipt image"], { type: "text/plain" }), "receipt.txt");
+  const response = await fetch(`${baseUrl}/api/public/reservations`, {
+    method: "POST",
+    body: form,
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "unsupported_receipt_type");
+});
+
+test("public multipart booking parses numeric fields before validating", async () => {
+  const form = new FormData();
+  form.append("hotelSlug", "x");
+  form.append("guestName", "Guest Example");
+  form.append("guestEmail", "guest@example.test");
+  form.append("guestPhone", "+10000000000");
+  form.append("checkIn", "2027-06-10");
+  form.append("checkOut", "2027-06-12");
+  form.append("roomTypeId", "0123456789abcdef01234567");
+  form.append("adults", "2");
+  form.append("children", "0");
+
+  const response = await fetch(`${baseUrl}/api/public/reservations`, {
+    method: "POST",
+    body: form,
+  });
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "validation_error");
+  assert.deepEqual(body.details.map(({ path }) => path), ["hotelSlug"]);
 });
 
 test("public hotel lookup rejects malformed slugs without database access", async () => {

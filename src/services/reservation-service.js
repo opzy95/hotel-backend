@@ -36,11 +36,13 @@ function dateInTimezone(timeZone, date) {
 function reservationPaymentSummary(reservation) {
   const totalMinor = reservation.totalMinor;
   const paidMinor = reservation.amountPaidMinor || 0;
-  const paymentStatus = totalMinor === 0 || paidMinor >= totalMinor
-    ? "paid"
-    : paidMinor > 0
-      ? "partially_paid"
-      : "unpaid";
+  const paymentStatus = reservation.paymentStatus === "pending_verification" && paidMinor === 0
+    ? "pending_verification"
+    : totalMinor === 0 || paidMinor >= totalMinor
+      ? "paid"
+      : paidMinor > 0
+        ? "partially_paid"
+        : "unpaid";
   return {
     totalMinor,
     paidMinor,
@@ -65,6 +67,15 @@ function paymentResource(payment, receivedBy) {
       id: user?._id || user,
       name: user?.name,
     },
+  };
+}
+
+function paymentReceiptResource(receipt) {
+  return {
+    url: receipt.secureUrl,
+    format: receipt.format,
+    bytes: receipt.bytes,
+    uploadedAt: receipt.uploadedAt,
   };
 }
 
@@ -116,6 +127,11 @@ function reservationResource(reservation, options = {}) {
     },
     paymentStatus: paymentSummary.paymentStatus,
     ...(options.includePaymentSummary ? { paymentSummary } : {}),
+    ...(options.includePaymentReceipt
+      && reservation.source === "public"
+      && reservation.paymentReceipt
+      ? { paymentReceipt: paymentReceiptResource(reservation.paymentReceipt) }
+      : {}),
     status: reservation.status,
     source: reservation.source,
     createdAt: reservation.createdAt,
@@ -309,6 +325,9 @@ async function listPayments(hotelId, reservationId) {
   return {
     payments: payments.map((payment) => paymentResource(payment)),
     paymentSummary: reservationPaymentSummary(reservation),
+    ...(reservation.source === "public" && reservation.paymentReceipt
+      ? { paymentReceipt: paymentReceiptResource(reservation.paymentReceipt) }
+      : {}),
   };
 }
 
@@ -449,7 +468,7 @@ async function getPublicAvailability(hotelSlug, data) {
   };
 }
 
-async function createReservation(hotelId, data, source) {
+async function createReservation(hotelId, data, source, paymentReceipt) {
   const checkIn = toDate(data.checkIn);
   const checkOut = toDate(data.checkOut);
   const nights = nightsBetween(data.checkIn, data.checkOut);
@@ -480,6 +499,10 @@ async function createReservation(hotelId, data, source) {
       const amount = totalMinor(roomType.baseRateMinor, nights);
       if (amount === null) {
         result = { error: "reservation_total_exceeded" };
+        return;
+      }
+      if (paymentReceipt && amount === 0) {
+        result = { error: "receipt_not_required" };
         return;
       }
       const available = await findAvailableRoom(
@@ -514,7 +537,12 @@ async function createReservation(hotelId, data, source) {
         totalMinor: amount,
         currency: roomType.currency,
         amountPaidMinor: 0,
-        paymentStatus: amount === 0 ? "paid" : "unpaid",
+        paymentStatus: paymentReceipt
+          ? "pending_verification"
+          : amount === 0 ? "paid" : "unpaid",
+        ...(paymentReceipt
+          ? { paymentReceipt: { ...paymentReceipt, uploadedAt: new Date() } }
+          : {}),
         status: "confirmed",
         source,
       }], { session });
@@ -535,12 +563,34 @@ async function createReservation(hotelId, data, source) {
   }
 }
 
-async function createPublicReservation(data) {
+async function createPublicReservation(data, receiptFile, receiptStorage) {
   const hotel = await findActiveHotelBySlug(data.hotelSlug);
   if (!hotel) {
     return { error: "hotel_not_found" };
   }
-  return createReservation(hotel._id, data, "public");
+  const paymentReceipt = receiptFile
+    ? await receiptStorage.uploadReceipt(receiptFile)
+    : null;
+  try {
+    const result = await createReservation(hotel._id, data, "public", paymentReceipt);
+    if (result?.error && paymentReceipt) {
+      await deleteUnattachedReceipt(paymentReceipt, receiptStorage);
+    }
+    return result;
+  } catch (error) {
+    if (paymentReceipt) {
+      await deleteUnattachedReceipt(paymentReceipt, receiptStorage);
+    }
+    throw error;
+  }
+}
+
+async function deleteUnattachedReceipt(receipt, receiptStorage) {
+  try {
+    await receiptStorage.deleteReceipt(receipt);
+  } catch (error) {
+    console.error("Failed to remove unattached reservation receipt", error);
+  }
 }
 
 async function lookupReservation(reference, email) {
@@ -593,7 +643,7 @@ async function sendUpcomingReservationReferences(email, sendEmail) {
   return { sent: true };
 }
 
-async function listReservations(hotelId, query) {
+async function listReservations(hotelId, query, options = {}) {
   const filter = { hotelId };
   if (query.status) {
     filter.status = query.status;
@@ -633,6 +683,7 @@ async function listReservations(hotelId, query) {
     reservations: reservations.map((reservation) => reservationResource(reservation, {
       includePaymentSummary: true,
       includeGuestProfile: true,
+      includePaymentReceipt: options.includePaymentReceipt,
     })),
     pagination: {
       page: query.page,
@@ -782,11 +833,11 @@ async function updateReservation(hotelId, reservationId, data) {
         totalMinor: amount,
         amountPaidMinor,
         currency: roomType.currency,
-        paymentStatus: amount === 0 || amountPaidMinor >= amount
-          ? "paid"
-          : amountPaidMinor > 0
-            ? "partially_paid"
-            : "unpaid",
+        paymentStatus: reservationPaymentSummary({
+          totalMinor: amount,
+          amountPaidMinor,
+          paymentStatus: current.paymentStatus,
+        }).paymentStatus,
         status: nextStatus,
       });
       await current.save({ session });
@@ -876,11 +927,11 @@ async function extendReservation(hotelId, reservationId, data) {
         checkOut: nextCheckOut,
         nights,
         totalMinor: amount,
-        paymentStatus: amountPaidMinor >= amount
-          ? "paid"
-          : amountPaidMinor > 0
-            ? "partially_paid"
-            : "unpaid",
+        paymentStatus: reservationPaymentSummary({
+          totalMinor: amount,
+          amountPaidMinor,
+          paymentStatus: current.paymentStatus,
+        }).paymentStatus,
       });
       await current.save({ session });
 

@@ -21,26 +21,51 @@ function validationDetails(issues) {
   }));
 }
 
+function multipartNumber(value) {
+  return typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+}
+
+function publicReservationBody(req) {
+  if (!req.is("multipart/form-data")) {
+    return req.body;
+  }
+  return {
+    ...req.body,
+    adults: multipartNumber(req.body.adults),
+    ...(req.body.children === undefined
+      ? {}
+      : { children: multipartNumber(req.body.children) }),
+  };
+}
+
 function sendServiceError(res, error) {
   const status = error === "hotel_not_found"
     || error === "reservation_not_found"
     || error === "room_type_not_found"
       ? 404
       : error === "invalid_stay_dates"
+        || error === "receipt_not_required"
         ? 400
         : 409;
   return res.status(status).json({ error });
 }
 
 async function createPublicReservation(req, res) {
-  const parsed = publicReservationSchema.safeParse(req.body);
+  if (req.file && req.file.size === 0) {
+    return res.status(400).json({ error: "empty_receipt" });
+  }
+  const parsed = publicReservationSchema.safeParse(publicReservationBody(req));
   if (!parsed.success) {
     return res.status(400).json({
       error: "validation_error",
       details: validationDetails(parsed.error.issues),
     });
   }
-  const result = await reservationService.createPublicReservation(parsed.data);
+  const result = await reservationService.createPublicReservation(
+    parsed.data,
+    req.file,
+    req.app.locals.receiptStorage,
+  );
   if (result.error) {
     return sendServiceError(res, result.error);
   }
@@ -93,7 +118,15 @@ async function listReservations(req, res) {
       details: validationDetails(parsed.error.issues),
     });
   }
-  return res.json(await reservationService.listReservations(req.params.hotelId, parsed.data));
+  const permissions = req.hotelMembership?.permissions || [];
+  const canReviewPayments = req.hotelMembership?.role === "manager"
+    || permissions.includes("payments.walk_in.create")
+    || permissions.includes("payments.create");
+  return res.json(await reservationService.listReservations(
+    req.params.hotelId,
+    parsed.data,
+    { includePaymentReceipt: canReviewPayments },
+  ));
 }
 
 async function getAvailability(req, res) {

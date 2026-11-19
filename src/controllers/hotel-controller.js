@@ -1,6 +1,7 @@
 const hotelService = require("../services/hotel-service");
 const {
   hotelSchema,
+  bankDetailsSchema,
   planSelectionSchema,
   publicHotelSlugSchema,
   settingsSchema,
@@ -58,6 +59,14 @@ async function onboarding(req, res) {
   return res.json(result);
 }
 
+async function getSettings(req, res) {
+  const hotel = await hotelService.getSettings(req.params.hotelId);
+  if (!hotel) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  return res.json({ hotel: publicHotel(hotel) });
+}
+
 async function selectSubscriptionPlan(req, res) {
   const parsed = planSelectionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -95,12 +104,26 @@ async function updateSettings(req, res) {
   return res.json({ hotel });
 }
 
+async function updateBankDetails(req, res) {
+  const parsed = bankDetailsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_bank_details" });
+  }
+  const hotel = await hotelService.updateBankDetails(req.params.hotelId, parsed.data);
+  if (!hotel) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  return res.json({ bankDetails: hotel.bankDetails });
+}
+
 module.exports = {
   createHotel,
+  getSettings,
   onboarding,
   publicHotelBySlug,
   publicHotels,
   publicPlans,
   selectSubscriptionPlan,
+  updateBankDetails,
   updateSettings,
 };

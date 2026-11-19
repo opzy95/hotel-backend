@@ -30,6 +30,21 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
   const suffix = randomUUID();
   const createdHotelIds = [];
   const createdUserIds = [];
+  const originalReceiptStorage = app.locals.receiptStorage;
+  const uploadedReceipts = [];
+  app.locals.receiptStorage = {
+    async uploadReceipt(file) {
+      uploadedReceipts.push(file);
+      return {
+        publicId: `test/${suffix}/receipt`,
+        secureUrl: `https://cdn.example.test/${suffix}/receipt.pdf`,
+        resourceType: "raw",
+        format: "pdf",
+        bytes: file.size,
+      };
+    },
+    async deleteReceipt() {},
+  };
 
   await mongoose.connect(testMongoUri);
   await Promise.all([
@@ -247,21 +262,33 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     assert.equal((await overCapacityResponse.json()).error, "room_guest_limit_exceeded");
 
     const jsonHeaders = { "content-type": "application/json" };
+    const bookingForm = new FormData();
+    for (const [field, value] of Object.entries(payload)) {
+      bookingForm.append(field, String(value));
+    }
+    bookingForm.append(
+      "receipt",
+      new Blob(["transfer receipt"], { type: "application/pdf" }),
+      "receipt.pdf",
+    );
     const createResponse = await fetch(`${baseUrl}/api/public/reservations`, {
       method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(payload),
+      body: bookingForm,
     });
     assert.equal(createResponse.status, 201);
     const created = (await createResponse.json()).reservation;
     assert.match(created.reference, /^HTL-[A-F0-9]{16}$/);
     assert.equal(created.pricing.nights, 2);
     assert.equal(created.pricing.totalMinor, 25000);
-    assert.equal(created.paymentStatus, "unpaid");
+    assert.equal(created.paymentStatus, "pending_verification");
+    assert.equal(created.paymentReceipt, undefined);
+    assert.equal(uploadedReceipts.length, 1);
     assert.equal(created.status, "confirmed");
     assert.equal(created.assignedRoom.code, "101");
     const storedReservation = await Reservation.findById(created.id).lean();
     assert.equal(storedReservation.hotelId.toString(), hotel._id.toString());
+    assert.equal(storedReservation.paymentStatus, "pending_verification");
+    assert.equal(storedReservation.paymentReceipt.publicId, `test/${suffix}/receipt`);
 
     const afterPublicBookingAvailability = await fetch(publicAvailabilityUrl);
     assert.equal(afterPublicBookingAvailability.status, 200);
@@ -278,6 +305,56 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     assert.equal(adminGuest.country, null);
     assert.equal(adminGuest.membershipTier, null);
     assert.ok(adminGuest.createdAt);
+    assert.equal(
+      reservations.reservations[0].paymentReceipt.url,
+      `https://cdn.example.test/${suffix}/receipt.pdf`,
+    );
+
+    const paymentReceptionist = await User.create({
+      name: "Payment Receptionist",
+      email: `payment-receptionist-${suffix}@example.test`,
+      passwordHash: "test",
+    });
+    const viewOnlyReceptionist = await User.create({
+      name: "View-only Receptionist",
+      email: `view-only-receptionist-${suffix}@example.test`,
+      passwordHash: "test",
+    });
+    createdUserIds.push(paymentReceptionist._id, viewOnlyReceptionist._id);
+    await HotelMembership.create([
+      {
+        hotelId: hotel._id,
+        userId: paymentReceptionist._id,
+        role: "receptionist",
+        permissions: ["reservations.view", "payments.walk_in.create"],
+      },
+      {
+        hotelId: hotel._id,
+        userId: viewOnlyReceptionist._id,
+        role: "receptionist",
+        permissions: ["reservations.view"],
+      },
+    ]);
+    const paymentReceptionistResponse = await fetch(reservationsUrl, {
+      headers: {
+        authorization: `Bearer ${signAccessToken(paymentReceptionist._id)}`,
+      },
+    });
+    assert.equal(paymentReceptionistResponse.status, 200);
+    assert.equal(
+      (await paymentReceptionistResponse.json()).reservations[0].paymentReceipt.url,
+      `https://cdn.example.test/${suffix}/receipt.pdf`,
+    );
+    const viewOnlyResponse = await fetch(reservationsUrl, {
+      headers: {
+        authorization: `Bearer ${signAccessToken(viewOnlyReceptionist._id)}`,
+      },
+    });
+    assert.equal(viewOnlyResponse.status, 200);
+    assert.equal(
+      "paymentReceipt" in (await viewOnlyResponse.json()).reservations[0],
+      false,
+    );
 
     const guestListUrl = `${baseUrl}/api/hotels/${hotel._id}/guests`;
     const guestListResponse = await fetch(guestListUrl, {
@@ -319,6 +396,10 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     const emptyPayments = await emptyPaymentsResponse.json();
     assert.deepEqual(emptyPayments.payments, []);
     assert.equal(emptyPayments.paymentSummary.balanceDueMinor, 25000);
+    assert.equal(
+      emptyPayments.paymentReceipt.url,
+      `https://cdn.example.test/${suffix}/receipt.pdf`,
+    );
 
     const firstPayment = {
       amountMinor: 10000,
@@ -468,6 +549,7 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     });
     assert.equal(afterCancellationResponse.status, 201);
   } finally {
+    app.locals.receiptStorage = originalReceiptStorage;
     await Guest.deleteMany({ hotelId: { $in: createdHotelIds } });
     await ReservationPayment.deleteMany({ hotelId: { $in: createdHotelIds } });
     await Reservation.deleteMany({ hotelId: { $in: createdHotelIds } });

@@ -58,6 +58,12 @@ const refreshSessionSchema = new Schema({
 refreshSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 refreshSessionSchema.index({ userId: 1, revokedAt: 1, consumedAt: 1 });
 
+const bankDetailsSchema = new Schema({
+  bankName: { type: String, required: true, trim: true, maxlength: 120 },
+  bankAccountNumber: { type: String, required: true, trim: true, maxlength: 40 },
+  accountName: { type: String, required: true, trim: true, maxlength: 120 },
+}, { _id: false });
+
 const hotelSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -70,6 +76,7 @@ const hotelSchema = new Schema({
     postalCode: { type: String, default: "" },
     country: { type: String, required: true, uppercase: true },
   },
+  bankDetails: { type: bankDetailsSchema, default: undefined },
   type: { type: String, required: true },
   roomCount: { type: Number, required: true, min: 0 },
   slug: { type: String, required: true, unique: true },
@@ -185,6 +192,15 @@ const staffMemberSchema = new Schema({
 staffMemberSchema.index({ hotelId: 1, email: 1 }, { unique: true });
 staffMemberSchema.index({ hotelId: 1, departmentId: 1 });
 
+const paymentReceiptSchema = new Schema({
+  publicId: { type: String, required: true },
+  secureUrl: { type: String, required: true },
+  resourceType: { type: String, enum: ["image", "raw"], required: true },
+  format: { type: String, required: true },
+  bytes: { type: Number, required: true, min: 1 },
+  uploadedAt: { type: Date, required: true },
+}, { _id: false });
+
 const reservationSchema = new Schema({
   hotelId: { type: Schema.Types.ObjectId, ref: "Hotel", required: true },
   guestId: { type: Schema.Types.ObjectId, ref: "Guest", default: null },
@@ -203,9 +219,10 @@ const reservationSchema = new Schema({
   totalMinor: { type: Number, required: true, min: 0 },
   amountPaidMinor: { type: Number, required: true, min: 0, default: 0 },
   currency: { type: String, required: true, uppercase: true, match: /^[A-Z]{3}$/ },
+  paymentReceipt: { type: paymentReceiptSchema, default: undefined },
   paymentStatus: {
     type: String,
-    enum: ["unpaid", "partially_paid", "paid", "refunded"],
+    enum: ["unpaid", "pending_verification", "partially_paid", "paid", "refunded"],
     default: "unpaid",
     required: true,
   },

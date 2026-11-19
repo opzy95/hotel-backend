@@ -71,6 +71,11 @@ test("hotel registration creates a Manager who can log in", {
             city: "Lagos",
             country: "NG",
           },
+          bankDetails: {
+            bankName: "Example Bank",
+            bankAccountNumber: "0012345678",
+            accountName: "Example Hotel Ltd",
+          },
           type: "boutique",
           roomCount: 40,
         },
@@ -96,6 +101,14 @@ test("hotel registration creates a Manager who can log in", {
     assert.equal(registration.onboarding.currentStep, "choose_plan");
 
     hotelIds.push(registration.hotel.id);
+    assert.deepEqual(
+      (await Hotel.findById(registration.hotel.id).lean()).bankDetails,
+      {
+        bankName: "Example Bank",
+        bankAccountNumber: "0012345678",
+        accountName: "Example Hotel Ltd",
+      },
+    );
     const manager = await User.findOne({ email: managerEmail }).select("+passwordHash");
     assert.ok(manager);
     userId = manager._id;
@@ -193,6 +206,44 @@ test("hotel registration creates a Manager who can log in", {
     const login = await loginResponse.json();
     assert.ok(login.token);
     const managerRefreshCookie = loginResponse.headers.get("set-cookie").split(";", 1)[0];
+
+    const updatedBankDetails = {
+      bankName: "Updated Example Bank",
+      bankAccountNumber: "0009876543",
+      accountName: "Updated Example Hotel Ltd",
+    };
+    const bankDetailsResponse = await fetch(
+      `${baseUrl}/api/hotels/${registration.hotel.id}/bank-details`,
+      {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${login.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(updatedBankDetails),
+      },
+    );
+    assert.equal(bankDetailsResponse.status, 200);
+    assert.deepEqual((await bankDetailsResponse.json()).bankDetails, updatedBankDetails);
+
+    const hotelSettingsResponse = await fetch(
+      `${baseUrl}/api/hotels/${registration.hotel.id}/settings`,
+      { headers: { authorization: `Bearer ${login.token}` } },
+    );
+    assert.equal(hotelSettingsResponse.status, 200);
+    const hotelSettings = (await hotelSettingsResponse.json()).hotel;
+    assert.equal(hotelSettings.id, registration.hotel.id);
+    assert.equal(hotelSettings.name, "Example Hotel");
+    assert.deepEqual(hotelSettings.bankDetails, updatedBankDetails);
+
+    const publicHotelResponse = await fetch(
+      `${baseUrl}/api/public/hotels/${registration.hotel.slug}`,
+    );
+    assert.equal(publicHotelResponse.status, 200);
+    assert.deepEqual(
+      (await publicHotelResponse.json()).hotel.bankDetails,
+      updatedBankDetails,
+    );
 
     const meResponse = await fetch(`${baseUrl}/api/auth/me`, {
       headers: { authorization: `Bearer ${login.token}` },
