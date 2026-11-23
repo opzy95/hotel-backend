@@ -163,6 +163,64 @@ async function listPendingApprovalHotels(page, limit, userId) {
   };
 }
 
+async function listPayments(page, limit) {
+  const [payments, total, statusCounts, revenueByCurrency] = await Promise.all([
+    SubscriptionPayment.find()
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate("hotelId", "name slug")
+      .select("hotelId provider providerReference amountMinor currency status verifiedAt createdAt")
+      .lean(),
+    SubscriptionPayment.countDocuments(),
+    SubscriptionPayment.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    SubscriptionPayment.aggregate([
+      { $match: { status: "successful" } },
+      {
+        $group: {
+          _id: "$currency",
+          amountMinor: { $sum: "$amountMinor" },
+          paymentCount: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+  ]);
+  const countByStatus = new Map(statusCounts.map(({ _id, count }) => [_id, count]));
+  return {
+    data: payments.map((payment) => ({
+      id: payment._id.toString(),
+      hotel: payment.hotelId ? {
+        id: payment.hotelId._id.toString(),
+        name: payment.hotelId.name,
+        slug: payment.hotelId.slug,
+      } : null,
+      provider: payment.provider,
+      providerReference: payment.providerReference,
+      amountMinor: payment.amountMinor,
+      currency: payment.currency,
+      status: payment.status,
+      verifiedAt: payment.verifiedAt,
+      createdAt: payment.createdAt,
+    })),
+    summary: {
+      totalPayments: total,
+      successfulPayments: countByStatus.get("successful") || 0,
+      pendingPayments: countByStatus.get("pending") || 0,
+      failedPayments: countByStatus.get("failed") || 0,
+      cancelledPayments: countByStatus.get("cancelled") || 0,
+      revenueByCurrency: revenueByCurrency.map(({ _id, amountMinor, paymentCount }) => ({
+        currency: _id,
+        amountMinor,
+        paymentCount,
+      })),
+    },
+    pagination: { page, limit, total },
+  };
+}
+
 async function updateHotelStatus(hotelId, status, userId) {
   await expireSubscriptions(hotelId);
   const session = await mongoose.startSession();
@@ -279,5 +337,6 @@ module.exports = {
   createPlan,
   listHotels,
   listPendingApprovalHotels,
+  listPayments,
   updateHotelStatus,
 };

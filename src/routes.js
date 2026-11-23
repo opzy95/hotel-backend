@@ -408,6 +408,12 @@ router.get(
   platformController.listHotels,
 );
 router.get(
+  "/api/platform/payments",
+  authenticate,
+  requirePlatformOperator,
+  platformController.listPayments,
+);
+router.get(
   "/api/platform/hotels/pending-approval",
   authenticate,
   requirePlatformOperator,

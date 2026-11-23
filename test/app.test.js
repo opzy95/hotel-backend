@@ -216,6 +216,10 @@ test("protected endpoints reject requests without a bearer token", async () => {
   const response = await fetch(`${baseUrl}/api/auth/me`);
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "authentication_required");
+
+  const platformPaymentsResponse = await fetch(`${baseUrl}/api/platform/payments`);
+  assert.equal(platformPaymentsResponse.status, 401);
+  assert.equal((await platformPaymentsResponse.json()).error, "authentication_required");
 });
 
 test("hotel settings endpoint requires authentication", async () => {

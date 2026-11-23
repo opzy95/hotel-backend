@@ -32,6 +32,17 @@ async function listPendingApprovalHotels(req, res) {
   ));
 }
 
+async function listPayments(req, res) {
+  const parsed = paginationSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_pagination" });
+  }
+  return res.json(await platformService.listPayments(
+    parsed.data.page,
+    parsed.data.limit,
+  ));
+}
+
 async function updateHotelStatus(req, res) {
   const parsed = hotelStatusSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -64,5 +75,6 @@ module.exports = {
   createPlan,
   listHotels,
   listPendingApprovalHotels,
+  listPayments,
   updateHotelStatus,
 };
