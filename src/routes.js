@@ -97,6 +97,10 @@ router.get("/health", (_req, res) => {
 router.get("/", (_req, res) => {
   res.json({ message: "Hotel backend is running" });
 });
+router.post(
+  "/api/payments/paystack/webhook",
+  hotelController.paystackWebhook,
+);
 router.get("/api/public/plans", hotelController.publicPlans);
 router.get(
   "/api/public/hotels",
@@ -189,6 +193,7 @@ router.put(
   "/api/hotels/:hotelId/bank-details",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   hotelController.updateBankDetails,
 );
 
@@ -202,24 +207,28 @@ router.post(
   "/api/hotels/:hotelId/room-types",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.createRoomType,
 );
 router.patch(
   "/api/hotels/:hotelId/room-types/:roomTypeId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.updateRoomType,
 );
 router.delete(
   "/api/hotels/:hotelId/room-types/:roomTypeId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.deactivateRoomType,
 );
 router.post(
   "/api/hotels/:hotelId/room-types/:roomTypeId/photos",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   parseRoomPhotos,
   roomController.uploadRoomTypePhotos,
 );
@@ -227,6 +236,7 @@ router.delete(
   "/api/hotels/:hotelId/room-types/:roomTypeId/photos/:photoId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.removeRoomTypePhoto,
 );
 router.get(
@@ -239,18 +249,21 @@ router.post(
   "/api/hotels/:hotelId/rooms",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.createRoom,
 );
 router.patch(
   "/api/hotels/:hotelId/rooms/:roomId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.updateRoom,
 );
 router.delete(
   "/api/hotels/:hotelId/rooms/:roomId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   roomController.deactivateRoom,
 );
 router.get(
@@ -263,12 +276,14 @@ router.post(
   "/api/hotels/:hotelId/guests",
   authenticate,
   requireHotelPermission("guests.create"),
+  requireSubscriptionWriteAccess,
   guestController.createGuest,
 );
 router.patch(
   "/api/hotels/:hotelId/guests/:guestId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   guestController.updateGuestProfile,
 );
 router.get(
@@ -281,6 +296,7 @@ router.post(
   "/api/hotels/:hotelId/departments",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffController.createDepartment,
 );
 router.get(
@@ -299,6 +315,7 @@ router.post(
   "/api/hotels/:hotelId/staff/invitations",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffInvitationLimiter,
   staffController.createInvitation,
 );
@@ -306,6 +323,7 @@ router.post(
   "/api/hotels/:hotelId/staff/:staffId/invitation",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffInvitationLimiter,
   staffController.createStaffMemberInvitation,
 );
@@ -313,6 +331,7 @@ router.post(
   "/api/hotels/:hotelId/staff/invitations/:invitationId/resend",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffInvitationLimiter,
   staffController.resendInvitation,
 );
@@ -320,24 +339,28 @@ router.delete(
   "/api/hotels/:hotelId/staff/invitations/:invitationId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffController.revokeInvitation,
 );
 router.post(
   "/api/hotels/:hotelId/staff",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffController.createStaffMember,
 );
 router.patch(
   "/api/hotels/:hotelId/staff/:staffId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffController.updateStaffMember,
 );
 router.delete(
   "/api/hotels/:hotelId/staff/:staffId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   staffController.deleteStaffMember,
 );
 router.get(
@@ -356,6 +379,7 @@ router.post(
   "/api/hotels/:hotelId/reservations/:reservationId/payments",
   authenticate,
   requireHotelPermission("payments.walk_in.create"),
+  requireSubscriptionWriteAccess,
   reservationController.recordPayment,
 );
 router.get(
@@ -368,36 +392,42 @@ router.post(
   "/api/hotels/:hotelId/reservations",
   authenticate,
   requireHotelPermission("reservations.create"),
+  requireSubscriptionWriteAccess,
   reservationController.createAdminReservation,
 );
 router.post(
   "/api/hotels/:hotelId/reservations/walk-ins",
   authenticate,
   requireHotelPermission("reservations.create"),
+  requireSubscriptionWriteAccess,
   reservationController.createWalkInReservation,
 );
 router.post(
   "/api/hotels/:hotelId/reservations/:reservationId/check-in",
   authenticate,
   requireHotelPermission("reservations.check_in"),
+  requireSubscriptionWriteAccess,
   reservationController.checkInReservation,
 );
 router.post(
   "/api/hotels/:hotelId/reservations/:reservationId/check-out",
   authenticate,
   requireHotelPermission("reservations.check_out"),
+  requireSubscriptionWriteAccess,
   reservationController.checkOutReservation,
 );
 router.post(
   "/api/hotels/:hotelId/reservations/:reservationId/extend",
   authenticate,
   requireHotelPermission("reservations.extend"),
+  requireSubscriptionWriteAccess,
   reservationController.extendReservation,
 );
 router.patch(
   "/api/hotels/:hotelId/reservations/:reservationId",
   authenticate,
   requireManager,
+  requireSubscriptionWriteAccess,
   reservationController.updateReservation,
 );
 

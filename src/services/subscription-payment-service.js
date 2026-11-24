@@ -389,8 +389,23 @@ async function verifySubscriptionPayment(hotelId, reference, gateway = paystackC
   return result;
 }
 
+async function processPaystackWebhook(reference, gateway = paystackClient) {
+  if (typeof reference !== "string" || !reference.trim()) {
+    return { ignored: true };
+  }
+  const payment = await SubscriptionPayment.findOne({
+    provider: "paystack",
+    providerReference: reference,
+  }).lean();
+  if (!payment) {
+    return { ignored: true };
+  }
+  return verifySubscriptionPayment(payment.hotelId, reference, gateway);
+}
+
 module.exports = {
   addBillingInterval,
   initializeSubscriptionPayment,
+  processPaystackWebhook,
   verifySubscriptionPayment,
 };

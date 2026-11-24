@@ -36,6 +36,10 @@ function createApp() {
     allowedHeaders: ["Authorization", "Content-Type"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   }));
+  app.use(
+    "/api/payments/paystack/webhook",
+    express.raw({ type: "application/json", limit: "32kb" }),
+  );
   app.use(cookieParser());
   app.use(express.json({ limit: "32kb" }));
   app.locals.sendVerificationCodeEmail = sendVerificationEmail;

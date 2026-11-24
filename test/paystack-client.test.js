@@ -1,9 +1,11 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const { createHmac } = require("node:crypto");
 const {
   PaystackConfigurationError,
   PaystackRequestError,
   createPaystackClient,
+  verifyPaystackWebhookSignature,
 } = require("../src/services/paystack-client");
 const { addBillingInterval } = require("../src/services/subscription-payment-service");
 
@@ -91,6 +93,32 @@ test("Paystack verification normalizes a provider response", async () => {
     channel: "card",
     paidAt: "2026-01-02T03:04:05.000Z",
   });
+});
+
+test("Paystack webhook signature requires the exact raw body and secret", () => {
+  const rawBody = Buffer.from(JSON.stringify({
+    event: "charge.success",
+    data: { reference: "SUB-test-reference" },
+  }));
+  const signature = createHmac("sha512", "webhook-secret")
+    .update(rawBody)
+    .digest("hex");
+
+  assert.equal(verifyPaystackWebhookSignature({
+    rawBody,
+    signature,
+    readWebhookSecret: () => "webhook-secret",
+  }), true);
+  assert.equal(verifyPaystackWebhookSignature({
+    rawBody: Buffer.from("tampered"),
+    signature,
+    readWebhookSecret: () => "webhook-secret",
+  }), false);
+  assert.equal(verifyPaystackWebhookSignature({
+    rawBody,
+    signature: "invalid",
+    readWebhookSecret: () => "webhook-secret",
+  }), false);
 });
 
 test("Paystack configuration and unsuccessful provider responses fail explicitly", async () => {

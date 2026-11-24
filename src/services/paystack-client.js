@@ -1,4 +1,26 @@
+const { createHmac, timingSafeEqual } = require("node:crypto");
+
 const PAYSTACK_API_URL = "https://api.paystack.co";
+
+function verifyPaystackWebhookSignature({
+  rawBody,
+  signature,
+  readWebhookSecret = () => process.env.PAYSTACK_WEBHOOK_SECRET?.trim()
+    || process.env.PAYSTACK_SECRET_KEY?.trim(),
+}) {
+  if (!Buffer.isBuffer(rawBody) || typeof signature !== "string") {
+    return false;
+  }
+  const secret = readWebhookSecret()?.trim();
+  if (!secret) {
+    return false;
+  }
+  const expected = createHmac("sha512", secret).update(rawBody).digest("hex");
+  const supplied = Buffer.from(signature.trim().toLowerCase(), "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  return supplied.length === expectedBuffer.length
+    && timingSafeEqual(supplied, expectedBuffer);
+}
 
 class PaystackConfigurationError extends Error {
   constructor(message) {
@@ -125,4 +147,5 @@ module.exports = {
   PaystackRequestError,
   createPaystackClient,
   paystackClient,
+  verifyPaystackWebhookSignature,
 };

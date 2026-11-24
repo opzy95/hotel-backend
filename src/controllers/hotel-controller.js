@@ -8,6 +8,7 @@ const {
   settingsSchema,
   subscriptionPaymentVerificationSchema,
 } = require("../schemas");
+const { verifyPaystackWebhookSignature } = require("../services/paystack-client");
 const { publicHotel } = require("../utils/public-resources");
 
 function validationDetails(issues) {
@@ -172,6 +173,33 @@ async function updateBankDetails(req, res) {
   return res.json({ bankDetails: hotel.bankDetails });
 }
 
+async function paystackWebhook(req, res) {
+  const rawBody = req.body;
+  const signature = req.get("x-paystack-signature");
+  if (!verifyPaystackWebhookSignature({ rawBody, signature })) {
+    return res.status(401).json({ error: "invalid_webhook_signature" });
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    return res.status(400).json({ error: "invalid_webhook_payload" });
+  }
+  if (event?.event !== "charge.success") {
+    return res.status(200).json({ received: true });
+  }
+  const reference = event?.data?.reference;
+  if (typeof reference !== "string" || !reference.trim()) {
+    return res.status(400).json({ error: "invalid_webhook_payload" });
+  }
+  await subscriptionPaymentService.processPaystackWebhook(
+    reference,
+    req.app.locals.subscriptionPaymentGateway,
+  );
+  return res.status(200).json({ received: true });
+}
+
 module.exports = {
   createHotel,
   getSettings,
@@ -180,6 +208,7 @@ module.exports = {
   publicHotelBySlug,
   publicHotels,
   publicPlans,
+  paystackWebhook,
   selectSubscriptionPlan,
   verifySubscriptionPayment,
   updateBankDetails,

@@ -106,6 +106,21 @@ test("free trial requires verified email, expires, and cannot be reused", {
     assert.equal(settingsResponse.status, 403);
     assert.equal((await settingsResponse.json()).error, "subscription_expired");
 
+    const bankDetailsResponse = await fetch(
+      `${baseUrl}/api/hotels/${hotel._id}/bank-details`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          bankName: "Test Bank",
+          accountName: "Test Hotel",
+          bankAccountNumber: "1234567890",
+        }),
+      },
+    );
+    assert.equal(bankDetailsResponse.status, 403);
+    assert.equal((await bankDetailsResponse.json()).error, "subscription_expired");
+
     const reusedTrialResponse = await selectTrial();
     assert.equal(reusedTrialResponse.status, 409);
     assert.equal((await reusedTrialResponse.json()).error, "trial_already_used");
