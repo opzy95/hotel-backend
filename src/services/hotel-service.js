@@ -60,7 +60,7 @@ async function createHotel(details, manager) {
 
 async function findActiveHotelBySlug(slug) {
   return Hotel.findOne({ slug, status: "active" })
-    .select("name slug phone address type settings bankDetails")
+    .select("name slug phone address type settings bankDetails coverImage secondaryImage")
     .lean();
 }
 
@@ -146,7 +146,7 @@ async function getOnboarding(hotelId) {
 
 async function getSettings(hotelId) {
   return Hotel.findById(hotelId)
-    .select("name email phone address type roomCount slug status settings bankDetails")
+    .select("name email phone address type roomCount slug status settings bankDetails coverImage secondaryImage")
     .lean();
 }
 
@@ -308,6 +308,82 @@ async function updateBankDetails(hotelId, bankDetails) {
   );
 }
 
+async function updateProfileImages(hotelId, images, storage) {
+  const hotel = await Hotel.findById(hotelId);
+  if (!hotel) {
+    return null;
+  }
+
+  const imageSlots = ["coverImage", "secondaryImage"];
+  const uploaded = [];
+  try {
+    for (const slot of imageSlots) {
+      const file = images[slot];
+      if (file) {
+        uploaded.push({
+          slot,
+          image: await storage.uploadHotelProfileImage(file.buffer, hotelId.toString()),
+        });
+      }
+    }
+  } catch (error) {
+    const uploadedImages = uploaded.map(({ image }) => image);
+    if (uploadedImages.length) {
+      try {
+        await storage.deleteImages(uploadedImages);
+      } catch (cleanupError) {
+        console.error("Failed to clean up hotel profile image upload", cleanupError);
+      }
+    }
+    throw error;
+  }
+
+  const replaced = uploaded.map(({ slot, image }) => ({
+    slot,
+    previousImage: hotel[slot],
+    image,
+  }));
+  for (const { slot, image } of replaced) {
+    hotel[slot] = image;
+  }
+  try {
+    await hotel.save();
+  } catch (error) {
+    const uploadedImages = uploaded.map(({ image }) => image);
+    try {
+      await storage.deleteImages(uploadedImages);
+    } catch (cleanupError) {
+      console.error("Failed to clean up hotel profile image upload", cleanupError);
+    }
+    throw error;
+  }
+
+  for (const { previousImage } of replaced) {
+    if (previousImage?.publicId) {
+      await storage.deleteImage(previousImage.publicId);
+    }
+  }
+
+  return publicHotel(hotel);
+}
+
+async function removeProfileImage(hotelId, slot, storage) {
+  const hotel = await Hotel.findById(hotelId);
+  if (!hotel) {
+    return null;
+  }
+  const imageField = slot === "cover" ? "coverImage" : "secondaryImage";
+  const previousImage = hotel[imageField];
+  if (!previousImage?.publicId) {
+    return { error: "profile_image_not_found" };
+  }
+
+  hotel[imageField] = null;
+  await hotel.save();
+  await storage.deleteImage(previousImage.publicId);
+  return { hotel: publicHotel(hotel) };
+}
+
 module.exports = {
   createHotel,
   createHotelWorkspace,
@@ -318,7 +394,9 @@ module.exports = {
   listPublicHotels,
   getPublicPlans,
   publicHotel,
+  removeProfileImage,
   selectSubscriptionPlan,
   updateBankDetails,
+  updateProfileImages,
   updateSettings,
 };

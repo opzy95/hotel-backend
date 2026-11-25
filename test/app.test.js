@@ -94,6 +94,31 @@ test("public hotel details expose configured bank information", () => {
   };
   assert.deepEqual(publicHotel({ ...hotel, _id: "hotel-id" }).bankDetails, bankDetails);
   assert.deepEqual(publicHotelDetails(hotel).bankDetails, bankDetails);
+  assert.equal(publicHotel({ ...hotel, _id: "hotel-id" }).coverImageUrl, null);
+  assert.equal(publicHotel({ ...hotel, _id: "hotel-id" }).secondaryImageUrl, null);
+  assert.equal(publicHotelDetails(hotel).coverImageUrl, null);
+  assert.equal(publicHotelDetails(hotel).secondaryImageUrl, null);
+  const hotelWithImages = {
+    ...hotel,
+    coverImage: { secureUrl: "https://images.example.test/cover.png" },
+    secondaryImage: { secureUrl: "https://images.example.test/secondary.png" },
+  };
+  assert.equal(
+    publicHotel({ ...hotelWithImages, _id: "hotel-id" }).coverImageUrl,
+    "https://images.example.test/cover.png",
+  );
+  assert.equal(
+    publicHotel({ ...hotelWithImages, _id: "hotel-id" }).secondaryImageUrl,
+    "https://images.example.test/secondary.png",
+  );
+  assert.equal(
+    publicHotelDetails(hotelWithImages).coverImageUrl,
+    "https://images.example.test/cover.png",
+  );
+  assert.equal(
+    publicHotelDetails(hotelWithImages).secondaryImageUrl,
+    "https://images.example.test/secondary.png",
+  );
   assert.equal(publicHotelDetails({ ...hotel, bankDetails: undefined }).bankDetails, null);
 });
 
@@ -226,6 +251,20 @@ test("hotel settings endpoint requires authentication", async () => {
   const response = await fetch(`${baseUrl}/api/hotels/not-an-id/settings`);
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "authentication_required");
+
+  const profileImageResponse = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/profile-images`,
+    { method: "POST" },
+  );
+  assert.equal(profileImageResponse.status, 401);
+  assert.equal((await profileImageResponse.json()).error, "authentication_required");
+
+  const removeProfileImageResponse = await fetch(
+    `${baseUrl}/api/hotels/not-an-id/profile-images/cover`,
+    { method: "DELETE" },
+  );
+  assert.equal(removeProfileImageResponse.status, 401);
+  assert.equal((await removeProfileImageResponse.json()).error, "authentication_required");
 });
 
 test("platform subscription payment endpoints require authentication", async () => {

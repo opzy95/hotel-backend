@@ -7,6 +7,10 @@ const platformController = require("./controllers/platform-controller");
 const reservationController = require("./controllers/reservation-controller");
 const roomController = require("./controllers/room-controller");
 const staffController = require("./controllers/staff-controller");
+const {
+  parseHotelProfileImage,
+  parseHotelProfileImages,
+} = require("./middleware/hotel-profile-image-upload");
 const { parseReceiptUpload } = require("./middleware/receipt-upload");
 const { parseRoomPhotos } = require("./middleware/room-photo-upload");
 const {
@@ -195,6 +199,29 @@ router.put(
   requireManager,
   requireSubscriptionWriteAccess,
   hotelController.updateBankDetails,
+);
+router.put(
+  "/api/hotels/:hotelId/profile-images",
+  authenticate,
+  requireManager,
+  requireSubscriptionWriteAccess,
+  parseHotelProfileImages,
+  hotelController.updateProfileImages,
+);
+router.post(
+  "/api/hotels/:hotelId/profile-images",
+  authenticate,
+  requireManager,
+  requireSubscriptionWriteAccess,
+  parseHotelProfileImage,
+  hotelController.uploadProfileImage,
+);
+router.delete(
+  "/api/hotels/:hotelId/profile-images/:slot",
+  authenticate,
+  requireManager,
+  requireSubscriptionWriteAccess,
+  hotelController.removeProfileImage,
 );
 
 router.get(

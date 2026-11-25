@@ -47,6 +47,7 @@ function createApp() {
   app.locals.sendStaffInvitationEmail = sendStaffInvitationEmail;
   app.locals.sendUpcomingReservationReferencesEmail = sendUpcomingReservationReferencesEmail;
   app.locals.roomPhotoStorage = cloudinaryStorage;
+  app.locals.hotelProfileImageStorage = cloudinaryStorage;
   app.locals.receiptStorage = cloudinaryStorage;
   app.locals.subscriptionPaymentGateway = paystackClient;
   app.use(routes);

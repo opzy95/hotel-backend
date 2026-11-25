@@ -45,6 +45,26 @@ test("hotel registration creates a Manager who can log in", {
   const sentEmails = [];
   const originalSendVerificationCodeEmail = app.locals.sendVerificationCodeEmail;
   const originalSendPasswordResetEmail = app.locals.sendPasswordResetEmail;
+  const originalHotelProfileImageStorage = app.locals.hotelProfileImageStorage;
+  const uploadedProfileImages = [];
+  const deletedProfileImageIds = [];
+  app.locals.hotelProfileImageStorage = {
+    async uploadHotelProfileImage(buffer, hotelId) {
+      const image = {
+        publicId: `profile/${hotelId}/${uploadedProfileImages.length + 1}`,
+        secureUrl: `https://images.example.test/${uploadedProfileImages.length + 1}.png`,
+        bytes: buffer.length,
+      };
+      uploadedProfileImages.push(image);
+      return image;
+    },
+    async deleteImage(publicId) {
+      deletedProfileImageIds.push(publicId);
+    },
+    async deleteImages(images) {
+      deletedProfileImageIds.push(...images.map(({ publicId }) => publicId));
+    },
+  };
   app.locals.sendVerificationCodeEmail = async (user, code) => {
     sentEmails.push({ type: "verification", user, code });
   };
@@ -206,6 +226,67 @@ test("hotel registration creates a Manager who can log in", {
     const login = await loginResponse.json();
     assert.ok(login.token);
     const managerRefreshCookie = loginResponse.headers.get("set-cookie").split(";", 1)[0];
+    const profileImagesUrl = `${baseUrl}/api/hotels/${registration.hotel.id}/profile-images`;
+    const profileImageHeaders = { authorization: `Bearer ${login.token}` };
+    const coverImageForm = new FormData();
+    coverImageForm.append("slot", "cover");
+    coverImageForm.append(
+      "image",
+      new Blob(["cover image"], { type: "image/png" }),
+      "cover.png",
+    );
+    const coverImageResponse = await fetch(profileImagesUrl, {
+      method: "POST",
+      headers: profileImageHeaders,
+      body: coverImageForm,
+    });
+    assert.equal(coverImageResponse.status, 200);
+    const coverImageHotel = (await coverImageResponse.json()).hotel;
+    assert.equal(coverImageHotel.coverImageUrl, "https://images.example.test/1.png");
+    assert.equal(coverImageHotel.secondaryImageUrl, null);
+
+    const secondaryImageForm = new FormData();
+    secondaryImageForm.append("slot", "secondary");
+    secondaryImageForm.append(
+      "image",
+      new Blob(["secondary image"], { type: "image/png" }),
+      "secondary.png",
+    );
+    const secondaryImageResponse = await fetch(profileImagesUrl, {
+      method: "POST",
+      headers: profileImageHeaders,
+      body: secondaryImageForm,
+    });
+    assert.equal(secondaryImageResponse.status, 200);
+    assert.deepEqual(
+      {
+        coverImageUrl: (await secondaryImageResponse.json()).hotel.coverImageUrl,
+        secondaryImageUrl: (await Hotel.findById(registration.hotel.id).lean())
+          .secondaryImage.secureUrl,
+      },
+      {
+        coverImageUrl: "https://images.example.test/1.png",
+        secondaryImageUrl: "https://images.example.test/2.png",
+      },
+    );
+
+    const replacementCoverForm = new FormData();
+    replacementCoverForm.append("slot", "cover");
+    replacementCoverForm.append(
+      "image",
+      new Blob(["replacement cover"], { type: "image/png" }),
+      "cover-replacement.png",
+    );
+    const replacementCoverResponse = await fetch(profileImagesUrl, {
+      method: "POST",
+      headers: profileImageHeaders,
+      body: replacementCoverForm,
+    });
+    assert.equal(replacementCoverResponse.status, 200);
+    const replacedProfile = (await replacementCoverResponse.json()).hotel;
+    assert.equal(replacedProfile.coverImageUrl, "https://images.example.test/3.png");
+    assert.equal(replacedProfile.secondaryImageUrl, "https://images.example.test/2.png");
+    assert.deepEqual(deletedProfileImageIds, [`profile/${registration.hotel.id}/1`]);
 
     const updatedBankDetails = {
       bankName: "Updated Example Bank",
@@ -235,15 +316,42 @@ test("hotel registration creates a Manager who can log in", {
     assert.equal(hotelSettings.id, registration.hotel.id);
     assert.equal(hotelSettings.name, "Example Hotel");
     assert.deepEqual(hotelSettings.bankDetails, updatedBankDetails);
+    assert.equal(hotelSettings.coverImageUrl, "https://images.example.test/3.png");
+    assert.equal(hotelSettings.secondaryImageUrl, "https://images.example.test/2.png");
 
     const publicHotelResponse = await fetch(
       `${baseUrl}/api/public/hotels/${registration.hotel.slug}`,
     );
     assert.equal(publicHotelResponse.status, 200);
+    const publicHotel = (await publicHotelResponse.json()).hotel;
     assert.deepEqual(
-      (await publicHotelResponse.json()).hotel.bankDetails,
+      publicHotel.bankDetails,
       updatedBankDetails,
     );
+    assert.equal(publicHotel.coverImageUrl, "https://images.example.test/3.png");
+    assert.equal(publicHotel.secondaryImageUrl, "https://images.example.test/2.png");
+
+    const deleteCoverResponse = await fetch(`${profileImagesUrl}/cover`, {
+      method: "DELETE",
+      headers: profileImageHeaders,
+    });
+    assert.equal(deleteCoverResponse.status, 200);
+    const hotelAfterCoverRemoval = (await deleteCoverResponse.json()).hotel;
+    assert.equal(hotelAfterCoverRemoval.coverImageUrl, null);
+    assert.equal(hotelAfterCoverRemoval.secondaryImageUrl, "https://images.example.test/2.png");
+    const deleteSecondaryResponse = await fetch(`${profileImagesUrl}/secondary`, {
+      method: "DELETE",
+      headers: profileImageHeaders,
+    });
+    assert.equal(deleteSecondaryResponse.status, 200);
+    const hotelAfterImageRemoval = (await deleteSecondaryResponse.json()).hotel;
+    assert.equal(hotelAfterImageRemoval.coverImageUrl, null);
+    assert.equal(hotelAfterImageRemoval.secondaryImageUrl, null);
+    assert.deepEqual(deletedProfileImageIds, [
+      `profile/${registration.hotel.id}/1`,
+      `profile/${registration.hotel.id}/3`,
+      `profile/${registration.hotel.id}/2`,
+    ]);
 
     const meResponse = await fetch(`${baseUrl}/api/auth/me`, {
       headers: { authorization: `Bearer ${login.token}` },
@@ -482,5 +590,6 @@ test("hotel registration creates a Manager who can log in", {
     await mongoose.disconnect();
     app.locals.sendVerificationCodeEmail = originalSendVerificationCodeEmail;
     app.locals.sendPasswordResetEmail = originalSendPasswordResetEmail;
+    app.locals.hotelProfileImageStorage = originalHotelProfileImageStorage;
   }
 });

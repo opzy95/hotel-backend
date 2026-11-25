@@ -57,7 +57,7 @@ expiry, issuer, and audience checks.
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
 | `GET` | `/api/public/hotels` | Public, rate-limited | List active hotels by name and slug |
-| `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details, including bank details when configured |
+| `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details, including bank details and profile image URLs |
 | `GET` | `/api/public/hotels/{hotelSlug}/availability` | Public, rate-limited | Search available room types and server-calculated pricing for dates and guest counts |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant (optional `bankDetails`), Manager membership, and pending subscription |
 | `POST` | `/api/auth/accept-invitation` | Public, rate-limited | Accept a single-use hotel staff invitation and set a password |
@@ -76,6 +76,9 @@ expiry, issuer, and audience checks.
 | `GET` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Read hotel details, operational settings, and bank details |
 | `PATCH` | `/api/hotels/{hotelId}/settings` | Hotel Manager | Update timezone, locale, currency, and check-in/out times |
 | `PUT` | `/api/hotels/{hotelId}/bank-details` | Hotel Manager | Set or replace bank details for public booking |
+| `POST` | `/api/hotels/{hotelId}/profile-images` | Hotel Manager | Upload or replace one profile image using multipart `slot` and `image` fields |
+| `DELETE` | `/api/hotels/{hotelId}/profile-images/{slot}` | Hotel Manager | Remove a profile image (`cover` or `secondary`) |
+| `PUT` | `/api/hotels/{hotelId}/profile-images` | Hotel Manager | Upload/replace either or both images using multipart `coverImage` and `secondaryImage` fields |
 | `GET` | `/api/hotels/{hotelId}/room-types` | Manager, or receptionist with `rooms.availability.view` | List active room types; only managers can include inactive types |
 | `POST` | `/api/hotels/{hotelId}/room-types` | Hotel Manager | Create a room type |
 | `PATCH` | `/api/hotels/{hotelId}/room-types/{roomTypeId}` | Hotel Manager | Update room type details |
@@ -314,9 +317,10 @@ Public hotel lookup:
 GET /api/public/hotels/grand-harbor
 ```
 
-Returns `{ "hotel": { "name", "slug", "phone", "address", "type", "settings", "bankDetails" } }`
+Returns `{ "hotel": { "name", "slug", "phone", "address", "type", "settings", "bankDetails", "coverImageUrl", "secondaryImageUrl" } }`
 for active hotels only. The public response omits internal hotel identifiers,
-account email, and hotel status.
+account email, and hotel status. The two profile image URL fields are `null`
+until an image is uploaded.
 
 Registration may include a `bankDetails` object under `hotel` with
 `bankName`, `bankAccountNumber`, and `accountName`. Managers can later set or
@@ -326,10 +330,18 @@ until configured; when present, guests can use it for bank-transfer payments.
 
 The manager-only `GET /api/hotels/{hotelId}/settings` returns the hotel profile
 (`id`, `name`, `email`, `phone`, `address`, `type`, `roomCount`, `slug`, and
-`status`) together with `settings` and `bankDetails`. Update operational
-settings with `PATCH /api/hotels/{hotelId}/settings`; update the bank account
-with `PUT /api/hotels/{hotelId}/bank-details`. Hotel identity and profile
-fields are read-only through these settings routes.
+`status`) together with `settings`, `bankDetails`, `coverImageUrl`, and
+`secondaryImageUrl`. Update operational settings with
+`PATCH /api/hotels/{hotelId}/settings`; update the bank account with
+`PUT /api/hotels/{hotelId}/bank-details`. Upload or replace profile images with
+`POST /api/hotels/{hotelId}/profile-images` using multipart form fields `slot`
+(`cover` or `secondary`) and `image` (one image, maximum 5 MiB). The `PUT`
+variant remains available for clients that send `coverImage` and/or
+`secondaryImage` fields; only supplied image fields are replaced. Remove an
+image with `DELETE /api/hotels/{hotelId}/profile-images/{slot}`. Successful
+uploads are stored in Cloudinary and their secure URLs appear in the settings
+and public hotel detail responses. Hotel identity and profile fields are
+read-only through the JSON settings route.
 
 Public availability search:
 

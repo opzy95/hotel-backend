@@ -26,6 +26,8 @@ function publicHotel(hotel) {
     status: hotel.status,
     settings: hotel.settings || {},
     bankDetails: hotelBankDetails(hotel.bankDetails),
+    coverImageUrl: hotel.coverImage?.secureUrl || null,
+    secondaryImageUrl: hotel.secondaryImage?.secureUrl || null,
   };
 }
 
@@ -46,6 +48,8 @@ function publicHotelDetails(hotel) {
     },
     type: hotel.type,
     bankDetails: hotelBankDetails(hotel.bankDetails),
+    coverImageUrl: hotel.coverImage?.secureUrl || null,
+    secondaryImageUrl: hotel.secondaryImage?.secureUrl || null,
     settings: {
       timezone: settings.timezone || "UTC",
       locale: settings.locale || null,

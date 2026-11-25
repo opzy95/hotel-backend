@@ -52,6 +52,38 @@ function uploadImage(buffer) {
   });
 }
 
+function uploadHotelProfileImage(buffer, hotelId) {
+  const client = configuredCloudinary();
+  return new Promise((resolve, reject) => {
+    const stream = client.uploader.upload_stream({
+      folder: `hotel-backend/hotels/${hotelId}/profile-images`,
+      resource_type: "image",
+      allowed_formats: ["jpg", "jpeg", "png", "webp", "avif"],
+    }, (error, result) => {
+      if (error) {
+        return reject(error);
+      }
+      if (!result?.public_id || !result.secure_url) {
+        return reject(new Error("Hotel profile image upload returned incomplete metadata"));
+      }
+      return resolve({
+        publicId: result.public_id,
+        secureUrl: result.secure_url,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+        bytes: result.bytes,
+      });
+    });
+    stream.end(buffer);
+  }).catch((error) => {
+    if (error instanceof CloudStorageConfigurationError) {
+      throw error;
+    }
+    throw new CloudStorageError("Hotel profile image upload failed");
+  });
+}
+
 function uploadReceipt(file) {
   const client = configuredCloudinary();
   return new Promise((resolve, reject) => {
@@ -137,6 +169,7 @@ module.exports = {
   deleteImage,
   deleteImages,
   deleteReceipt,
+  uploadHotelProfileImage,
   uploadReceipt,
   uploadImages,
 };

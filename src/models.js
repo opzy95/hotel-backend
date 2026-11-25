@@ -64,6 +64,15 @@ const bankDetailsSchema = new Schema({
   accountName: { type: String, required: true, trim: true, maxlength: 120 },
 }, { _id: false });
 
+const hotelProfileImageSchema = new Schema({
+  publicId: { type: String, required: true },
+  secureUrl: { type: String, required: true },
+  width: Number,
+  height: Number,
+  format: String,
+  bytes: Number,
+}, { _id: false });
+
 const hotelSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -77,6 +86,8 @@ const hotelSchema = new Schema({
     country: { type: String, required: true, uppercase: true },
   },
   bankDetails: { type: bankDetailsSchema, default: undefined },
+  coverImage: { type: hotelProfileImageSchema, default: null },
+  secondaryImage: { type: hotelProfileImageSchema, default: null },
   type: { type: String, required: true },
   roomCount: { type: Number, required: true, min: 0 },
   slug: { type: String, required: true, unique: true },

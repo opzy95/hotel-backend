@@ -11,6 +11,16 @@ const {
 const { verifyPaystackWebhookSignature } = require("../services/paystack-client");
 const { publicHotel } = require("../utils/public-resources");
 
+function profileImageField(slot) {
+  if (slot === "cover") {
+    return "coverImage";
+  }
+  if (slot === "secondary") {
+    return "secondaryImage";
+  }
+  return null;
+}
+
 function validationDetails(issues) {
   return issues.map(({ path, message }) => ({
     path: path.join("."),
@@ -173,6 +183,66 @@ async function updateBankDetails(req, res) {
   return res.json({ bankDetails: hotel.bankDetails });
 }
 
+async function updateProfileImages(req, res) {
+  const images = {
+    coverImage: req.files?.coverImage?.[0],
+    secondaryImage: req.files?.secondaryImage?.[0],
+  };
+  if (!images.coverImage && !images.secondaryImage) {
+    return res.status(400).json({ error: "profile_images_required" });
+  }
+
+  const hotel = await hotelService.updateProfileImages(
+    req.params.hotelId,
+    images,
+    req.app.locals.hotelProfileImageStorage,
+  );
+  if (!hotel) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  return res.json({ hotel });
+}
+
+async function uploadProfileImage(req, res) {
+  const imageField = profileImageField(req.body?.slot);
+  if (!imageField) {
+    return res.status(400).json({ error: "invalid_profile_image_slot" });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: "profile_image_required" });
+  }
+
+  const hotel = await hotelService.updateProfileImages(
+    req.params.hotelId,
+    { [imageField]: req.file },
+    req.app.locals.hotelProfileImageStorage,
+  );
+  if (!hotel) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  return res.json({ hotel });
+}
+
+async function removeProfileImage(req, res) {
+  const slot = req.params.slot;
+  if (!profileImageField(slot)) {
+    return res.status(400).json({ error: "invalid_profile_image_slot" });
+  }
+
+  const result = await hotelService.removeProfileImage(
+    req.params.hotelId,
+    slot,
+    req.app.locals.hotelProfileImageStorage,
+  );
+  if (!result) {
+    return res.status(404).json({ error: "hotel_not_found" });
+  }
+  if (result.error === "profile_image_not_found") {
+    return res.status(404).json({ error: result.error });
+  }
+  return res.json(result);
+}
+
 async function paystackWebhook(req, res) {
   const rawBody = req.body;
   const signature = req.get("x-paystack-signature");
@@ -208,6 +278,9 @@ module.exports = {
   publicHotelBySlug,
   publicHotels,
   publicPlans,
+  removeProfileImage,
+  updateProfileImages,
+  uploadProfileImage,
   paystackWebhook,
   selectSubscriptionPlan,
   verifySubscriptionPayment,
