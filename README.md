@@ -56,7 +56,7 @@ expiry, issuer, and audience checks.
 |---|---|---|---|
 | `GET` | `/health` | Public | Health check |
 | `GET` | `/api/public/plans` | Public | List active plans |
-| `GET` | `/api/public/hotels` | Public, rate-limited | List active hotels by name and slug |
+| `GET` | `/api/public/hotels` | Public, rate-limited | List active hotels by name, slug, and address |
 | `GET` | `/api/public/hotels/{hotelSlug}` | Public, rate-limited | Look up an active hotel and its guest-facing details, including bank details and profile image URLs |
 | `GET` | `/api/public/hotels/{hotelSlug}/availability` | Public, rate-limited | Search available room types and server-calculated pricing for dates and guest counts |
 | `POST` | `/api/auth/register` | Public, rate-limited | Create account, hotel tenant (optional `bankDetails`), Manager membership, and pending subscription |
@@ -307,9 +307,9 @@ The homepage can list active properties with:
 GET /api/public/hotels
 ```
 
-The response is `{ "hotels": [{ "name": "...", "slug": "..." }] }`; inactive
-hotels are omitted. Use a returned slug for the public hotel lookup and booking
-URLs.
+The response is `{ "hotels": [{ "name": "...", "slug": "...", "address": { "line1": "...", "line2": "", "city": "...", "region": "", "postalCode": "", "country": "..." } }] }`;
+inactive hotels are omitted. Use a returned slug for the public hotel lookup
+and booking URLs.
 
 Public hotel lookup:
 

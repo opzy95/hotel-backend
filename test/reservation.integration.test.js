@@ -159,11 +159,33 @@ test("public and admin reservations enforce inventory, price, lookup, and tenant
     const publicHotels = (await publicHotelsResponse.json()).hotels;
     assert.deepEqual(
       publicHotels.find((listedHotel) => listedHotel.slug === hotel.slug),
-      { name: hotel.name, slug: hotel.slug },
+      {
+        name: hotel.name,
+        slug: hotel.slug,
+        address: {
+          line1: "1 Test Street",
+          line2: "",
+          city: "Test",
+          region: "",
+          postalCode: "",
+          country: "US",
+        },
+      },
     );
     assert.deepEqual(
       publicHotels.find((listedHotel) => listedHotel.slug === otherHotel.slug),
-      { name: otherHotel.name, slug: otherHotel.slug },
+      {
+        name: otherHotel.name,
+        slug: otherHotel.slug,
+        address: {
+          line1: "2 Test Street",
+          line2: "",
+          city: "Test",
+          region: "",
+          postalCode: "",
+          country: "US",
+        },
+      },
     );
     assert.equal(
       publicHotels.some((listedHotel) => listedHotel.slug === inactiveHotel.slug),

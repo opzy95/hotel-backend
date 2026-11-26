@@ -71,10 +71,10 @@ async function getPublicHotelBySlug(slug) {
 
 async function listPublicHotels() {
   const hotels = await Hotel.find({ status: "active" })
-    .select("name slug")
+    .select("name slug address")
     .sort({ name: 1 })
     .lean();
-  return hotels.map(({ name, slug }) => ({ name, slug }));
+  return hotels.map(({ name, slug, address }) => ({ name, slug, address }));
 }
 
 async function getPublicPlans() {
